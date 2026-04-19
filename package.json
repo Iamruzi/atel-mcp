@@ -1,0 +1,28 @@
+{
+  "name": "atel-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ATEL Remote MCP server scaffold",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/server/http.js",
+    "test": "node --test dist/tests/**/*.test.js",
+    "smoke:http": "node dist/dev/smoke-http.js",
+    "smoke:p2p": "node dist/dev/smoke-p2p.js",
+    "smoke:order": "node dist/dev/smoke-order.js",
+    "smoke:dispute": "node dist/dev/smoke-dispute.js",
+    "smoke:auto-arbitration": "node dist/dev/smoke-auto-arbitration.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.4.0",
+    "typescript": "^5.9.2"
+  }
+}
