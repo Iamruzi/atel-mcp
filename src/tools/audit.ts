@@ -1,8 +1,8 @@
-import { AuditOrderQueryInputSchema, AuditSessionQueryInputSchema } from '../contracts/schemas.js';
+import { AuditOrderQueryInputSchema, AuditRequestQueryInputSchema, AuditSessionQueryInputSchema } from '../contracts/schemas.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
-import { queryAuditByOrder, queryAuditBySession } from '../audit/query.js';
+import { queryAuditByOrder, queryAuditByRequest, queryAuditBySession } from '../audit/query.js';
 
 export async function atelAuditOrderGet(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.read');
@@ -34,4 +34,20 @@ export async function atelAuditSessionGet(ctx: ToolExecutionContext, input: unkn
     metadata: { auditQuery: 'session', returned: events.length },
   });
   return { sessionId, events };
+}
+
+
+export async function atelAuditRequestGet(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'identity.read');
+  const parsed = AuditRequestQueryInputSchema.parse(input);
+  const events = await queryAuditByRequest(ctx.config, ctx.session.did, parsed.requestId, parsed.limit);
+  await ctx.emitAudit({
+    ...childAuditBase(ctx),
+    type: 'tool.succeeded',
+    status: 'ok',
+    entityType: 'request',
+    entityId: parsed.requestId,
+    metadata: { auditQuery: 'request', returned: events.length },
+  });
+  return { requestId: parsed.requestId, events };
 }

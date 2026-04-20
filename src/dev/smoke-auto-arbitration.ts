@@ -53,11 +53,7 @@ async function main() {
     const submitResults: any[] = [];
     const rejects: any[] = [];
     const goodContent = [
-      'Output contract:',
-      '1. Direction must be exactly one word: bullish, bearish, or sideways.',
-      '2. Final answer must contain exactly 3 numbered reasons.',
-      '3. Each reason must be one plain-English sentence under 12 words.',
-      'Current direction judgment: sideways.',
+      'sideways',
       '1. Price action remains range-bound without a breakout.',
       '2. Bullish and bearish catalysts currently offset each other.',
       '3. Mixed momentum favors consolidation over trend extension.',

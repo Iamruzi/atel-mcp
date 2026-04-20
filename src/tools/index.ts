@@ -30,6 +30,7 @@ export const TOOL_HANDLERS = {
   atel_dispute_create: dispute.atelDisputeCreate,
   atel_audit_order_get: audit.atelAuditOrderGet,
   atel_audit_session_get: audit.atelAuditSessionGet,
+  atel_audit_request_get: audit.atelAuditRequestGet,
 } as const;
 
 export type ToolName = keyof typeof TOOL_HANDLERS;

@@ -13,7 +13,7 @@ export async function registrySearch(ctx: ToolExecutionContext, input: { query: 
 export async function registryRegister(ctx: ToolExecutionContext, input: { name: string; description?: string; capabilities: string[]; discoverable: boolean }) {
   return ctx.platform.request<unknown>({
     method: 'POST',
-    path: PLATFORM_ENDPOINTS.registry.register,
+    path: PLATFORM_ENDPOINTS.registry.remoteRegister,
     body: input,
     bearerToken: ctx.session.bearerToken,
   });

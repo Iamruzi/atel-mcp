@@ -14,7 +14,7 @@ export async function atelWhoami(ctx: ToolExecutionContext) {
 }
 
 export async function atelAgentRegister(ctx: ToolExecutionContext, input: unknown) {
-  requireScope(ctx, 'contacts.write');
+  requireScope(ctx, 'identity.read');
   return registryRegister(ctx, AgentRegisterInputSchema.parse(input));
 }
 

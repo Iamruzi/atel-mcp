@@ -4,13 +4,13 @@ import type { AtelSession, EnvironmentGuardOptions, PrerequisiteCheckResult, Sco
 
 export function assertScopes(session: AtelSession, options: ScopeCheckOptions): void {
   if (options.requireAll?.some((scope) => !session.scopes.includes(scope))) {
-    throw new AtelMcpError('FORBIDDEN', 'Session is missing required scopes.', {
+    throw new AtelMcpError('FORBIDDEN', 'This tool is not available for the current session.', {
       required: options.requireAll,
       actual: session.scopes,
     });
   }
   if (options.requireAny?.length && !options.requireAny.some((scope) => session.scopes.includes(scope))) {
-    throw new AtelMcpError('FORBIDDEN', 'Session is missing any acceptable scope.', {
+    throw new AtelMcpError('FORBIDDEN', 'This tool requires a different permission set.', {
       requiredAny: options.requireAny,
       actual: session.scopes,
     });
@@ -19,7 +19,7 @@ export function assertScopes(session: AtelSession, options: ScopeCheckOptions): 
 
 export function assertEnvironment(session: AtelSession, options: EnvironmentGuardOptions): void {
   if (!options.allowed.includes(session.environment)) {
-    throw new AtelMcpError('ENVIRONMENT_MISMATCH', 'Session environment is not allowed for this tool.', {
+    throw new AtelMcpError('ENVIRONMENT_MISMATCH', 'This tool is not available in the current environment.', {
       allowed: options.allowed,
       actual: session.environment,
     });
@@ -31,7 +31,7 @@ export function assertRemoteEnvironmentAllowed(
   allowedRemoteEnvironments: AtelEnvironmentProfile[] = ['production'],
 ): void {
   if (!allowedRemoteEnvironments.includes(session.environment)) {
-    throw new AtelMcpError('ENVIRONMENT_MISMATCH', 'Remote MCP does not allow this environment.', {
+    throw new AtelMcpError('ENVIRONMENT_MISMATCH', 'Remote MCP is not enabled for this environment.', {
       allowedRemoteEnvironments,
       actual: session.environment,
     });

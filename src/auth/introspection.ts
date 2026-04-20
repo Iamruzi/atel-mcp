@@ -22,7 +22,7 @@ export class PlatformAuthIntrospectionClient implements AuthIntrospectionClient 
       return this.toClaimsFromMe(meAttempt.payload);
     }
 
-    throw new AtelMcpError('UNAUTHORIZED', 'Bearer token is invalid or expired.', {
+    throw new AtelMcpError('UNAUTHORIZED', 'Authentication failed or the session has expired.', {
       sessionAttempt: {
         status: sessionAttempt.status,
         payload: sessionAttempt.payload,

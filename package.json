@@ -9,11 +9,14 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/server/http.js",
     "test": "node --test dist/tests/**/*.test.js",
+    "smoke:cleanup": "node dist/dev/smoke-cleanup.js",
+    "smoke:happy": "node dist/dev/smoke-happy-path.js",
     "smoke:http": "node dist/dev/smoke-http.js",
     "smoke:p2p": "node dist/dev/smoke-p2p.js",
     "smoke:order": "node dist/dev/smoke-order.js",
     "smoke:dispute": "node dist/dev/smoke-dispute.js",
-    "smoke:auto-arbitration": "node dist/dev/smoke-auto-arbitration.js"
+    "smoke:auto-arbitration": "node dist/dev/smoke-auto-arbitration.js",
+    "smoke:env-mismatch": "node dist/dev/smoke-environment-mismatch.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

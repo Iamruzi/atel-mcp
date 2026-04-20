@@ -7,6 +7,7 @@ export const PLATFORM_ENDPOINTS = {
   },
   registry: {
     register: '/registry/v1/register',
+    remoteRegister: '/registry/v1/remote/register',
     search: '/registry/v1/search'
   },
   account: {

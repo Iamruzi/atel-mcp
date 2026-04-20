@@ -65,3 +65,8 @@ export const AuditSessionQueryInputSchema = z.object({
   sessionId: z.string().min(1).optional(),
   limit: z.number().int().min(1).max(500).optional().default(100)
 });
+
+export const AuditRequestQueryInputSchema = z.object({
+  requestId: z.string().min(1),
+  limit: z.number().int().min(1).max(500).optional().default(100)
+});

@@ -51,7 +51,7 @@ export class PlatformClient {
 
     const payload = await parseJson(response);
     if (!response.ok) {
-      throw new AtelMcpError('UPSTREAM_ERROR', `Platform request failed: ${response.status}`, {
+      throw new AtelMcpError('UPSTREAM_ERROR', 'The ATEL platform could not complete this request.', {
         status: response.status,
         path: req.path,
         payload,

@@ -4,6 +4,7 @@ import {
   AgentSearchInputSchema,
   DisputeCreateInputSchema,
   AuditOrderQueryInputSchema,
+  AuditRequestQueryInputSchema,
   AuditSessionQueryInputSchema,
   MilestoneActionInputSchema,
   MilestoneSubmitInputSchema,
@@ -50,5 +51,6 @@ export const MVP_MANIFEST = {
   audit: [
     { name: 'atel_audit_order_get', input: AuditOrderQueryInputSchema },
     { name: 'atel_audit_session_get', input: AuditSessionQueryInputSchema },
+    { name: 'atel_audit_request_get', input: AuditRequestQueryInputSchema },
   ]
 } as const;

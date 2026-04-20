@@ -4,15 +4,15 @@ import { AtelMcpError } from '../contracts/errors.js';
 
 export function parseBearerToken(value?: string | null): string {
   const raw = value?.trim();
-  if (!raw) throw new AtelMcpError('UNAUTHORIZED', 'Missing Authorization header.');
+  if (!raw) throw new AtelMcpError('UNAUTHORIZED', 'Authentication is required.');
   const match = /^Bearer\s+(.+)$/i.exec(raw);
-  if (!match?.[1]) throw new AtelMcpError('UNAUTHORIZED', 'Authorization header must use Bearer token.');
+  if (!match?.[1]) throw new AtelMcpError('UNAUTHORIZED', 'Authentication must use a Bearer token.');
   return match[1].trim();
 }
 
 export function toAtelSession(token: string, claims: RemoteBearerClaims): AtelSession {
   if (!claims.did?.startsWith('did:atel:')) {
-    throw new AtelMcpError('UNAUTHORIZED', 'Bearer token did not resolve to a valid ATEL DID.');
+    throw new AtelMcpError('UNAUTHORIZED', 'Authenticated session is not linked to a valid ATEL identity.');
   }
   return {
     subject: claims.sub,

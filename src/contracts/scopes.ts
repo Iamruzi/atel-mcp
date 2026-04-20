@@ -46,5 +46,6 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_dispute_list: { all: ['disputes.read'] },
   atel_audit_order_get: { all: ['orders.read'] },
   atel_audit_session_get: { all: ['identity.read'] },
+  atel_audit_request_get: { all: ['identity.read'] },
   atel_dispute_create: { all: ['disputes.write'] },
 };

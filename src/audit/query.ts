@@ -9,7 +9,7 @@ export interface StoredAuditEvent extends AuditEvent {
 }
 
 async function loadAuditEvents(config: AtelMcpConfig): Promise<StoredAuditEvent[]> {
-  if (!config.auditLogPath) throw new AtelMcpError('PREREQUISITE_NOT_MET', 'ATEL_MCP_AUDIT_LOG_PATH is not configured');
+  if (!config.auditLogPath) throw new AtelMcpError('PREREQUISITE_NOT_MET', 'Audit records are not available in this environment.', { missing: 'auditLogPath' });
   try {
     const raw = await readFile(config.auditLogPath, 'utf8');
     return raw
@@ -19,7 +19,7 @@ async function loadAuditEvents(config: AtelMcpConfig): Promise<StoredAuditEvent[
       .map((line) => JSON.parse(line) as StoredAuditEvent);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new AtelMcpError('NOT_FOUND', `Unable to read audit log: ${message}`);
+    throw new AtelMcpError('NOT_FOUND', 'Audit records are unavailable right now.', { reason: message });
   }
 }
 
@@ -35,6 +35,15 @@ export async function queryAuditBySession(config: AtelMcpConfig, did: string, se
   const events = await loadAuditEvents(config);
   return events
     .filter((event) => event.sessionId === sessionId && event.did === did)
+    .slice(-limit)
+    .reverse();
+}
+
+
+export async function queryAuditByRequest(config: AtelMcpConfig, did: string, requestId: string, limit: number) {
+  const events = await loadAuditEvents(config);
+  return events
+    .filter((event) => event.requestId === requestId && event.did === did)
     .slice(-limit)
     .reverse();
 }
