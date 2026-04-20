@@ -75,6 +75,8 @@ async function main() {
     }
 
     const timeline = parseTextPayload(await requester.callTool({ name: 'atel_order_timeline', arguments: { orderId } }));
+    const finalOrder = parseTextPayload(await requester.callTool({ name: 'atel_order_get', arguments: { orderId } }));
+    const finalMilestones = parseTextPayload(await requester.callTool({ name: 'atel_milestone_list', arguments: { orderId } }));
     const orderAudit = parseTextPayload(await requester.callTool({ name: 'atel_audit_order_get', arguments: { orderId, limit: 50 } }));
     const requesterSessionAudit = parseTextPayload(await requester.callTool({ name: 'atel_audit_session_get', arguments: { limit: 30 } }));
 
@@ -89,6 +91,37 @@ async function main() {
       throw new Error(`Expected arbitration_failed, got ${finalOutcome}`);
     }
 
+    const finalStatus = String(finalOrder?.status ?? finalOrder?.Status ?? '').toLowerCase();
+    const currentMilestone = Number(finalMilestones?.currentMilestone ?? -1);
+    const timelineEvents = Array.isArray(timeline?.events) ? timeline.events : [];
+    const timelineEventTypes = timelineEvents.map((event: any) => String(event?.eventType ?? '').toLowerCase());
+    const auditEvents = Array.isArray(orderAudit?.events) ? orderAudit.events : [];
+    const auditEventTypes = auditEvents.map((event: any) => String(event?.type ?? '').toLowerCase());
+
+    if (expectedOutcome === 'passed') {
+      if (finalStatus !== 'executing') {
+        throw new Error(`Expected executing order after arbitration_passed, got ${finalStatus}`);
+      }
+      if (currentMilestone !== 1) {
+        throw new Error(`Expected currentMilestone=1 after arbitration_passed, got ${currentMilestone}`);
+      }
+      if (!auditEventTypes.includes('milestone.arbitration_passed')) {
+        throw new Error(`Expected milestone.arbitration_passed in order audit, got ${JSON.stringify(auditEventTypes)}`);
+      }
+    }
+
+    if (expectedOutcome === 'failed') {
+      if (finalStatus !== 'cancelled') {
+        throw new Error(`Expected cancelled order after arbitration_failed, got ${finalStatus}`);
+      }
+      if (!timelineEventTypes.includes('order.cancelled')) {
+        throw new Error(`Expected order.cancelled in timeline, got ${JSON.stringify(timelineEventTypes)}`);
+      }
+      if (!auditEventTypes.includes('milestone.arbitration_failed')) {
+        throw new Error(`Expected milestone.arbitration_failed in order audit, got ${JSON.stringify(auditEventTypes)}`);
+      }
+    }
+
     console.log(JSON.stringify({
       ok: true,
       expectedOutcome,
@@ -96,6 +129,8 @@ async function main() {
       createResult,
       acceptResult,
       milestones,
+      finalOrder,
+      finalMilestones,
       submitResults,
       rejects,
       timeline,

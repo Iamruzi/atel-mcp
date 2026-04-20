@@ -10,14 +10,25 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 cd "$ROOT_DIR"
-./scripts/stop-release-candidate.sh || true
-npm run smoke:cleanup
-./scripts/run-release-candidate.sh "$ENV_FILE"
-sleep 2
-./scripts/healthcheck.sh "$ENV_FILE"
 
-set -a
-source "$ENV_FILE"
-set +a
+run_case() {
+  local label="$1"
+  shift
 
-node dist/dev/smoke-happy-path.js
+  echo "==> release smoke case: $label"
+  ./scripts/stop-release-candidate.sh || true
+  npm run smoke:cleanup
+  ./scripts/run-release-candidate.sh "$ENV_FILE"
+  sleep 2
+  ./scripts/healthcheck.sh "$ENV_FILE"
+
+  set -a
+  source "$ENV_FILE"
+  set +a
+
+  "$@"
+}
+
+run_case "happy-path" node dist/dev/smoke-happy-path.js
+run_case "auto-arbitration-passed" env ATEL_MCP_ARBITRATION_EXPECTED=passed node dist/dev/smoke-auto-arbitration.js
+run_case "auto-arbitration-failed" env ATEL_MCP_ARBITRATION_EXPECTED=failed node dist/dev/smoke-auto-arbitration.js

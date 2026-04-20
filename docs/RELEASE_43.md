@@ -56,13 +56,10 @@ This runs:
 1. cleanup
 2. MCP HTTP smoke
 3. happy-path smoke
+4. auto-arbitration passed branch
+5. auto-arbitration failed branch
 
-If arbitration release smoke is required, run separately:
-
-```bash
-ATEL_MCP_ARBITRATION_EXPECTED=passed node dist/dev/smoke-auto-arbitration.js
-ATEL_MCP_ARBITRATION_EXPECTED=failed node dist/dev/smoke-auto-arbitration.js
-```
+The script performs cleanup and RC restart before each branch so stale dev state does not leak across runs.
 
 ## Release discipline
 
@@ -72,6 +69,20 @@ Before every release-debug run on 43:
 3. run health check
 4. run release smoke
 5. inspect audit log under `.runtime/audit/`
+
+## Arbitration branch expectations
+
+- `ATEL_MCP_ARBITRATION_EXPECTED=passed`
+  - third reject returns `arbitration_passed`
+  - final order remains `executing`
+  - `currentMilestone` advances to `1`
+  - order audit contains `milestone.arbitration_passed`
+
+- `ATEL_MCP_ARBITRATION_EXPECTED=failed`
+  - third reject returns `arbitration_failed`
+  - final order becomes `cancelled`
+  - timeline contains `order.cancelled`
+  - order audit contains `milestone.arbitration_failed`
 
 ## Not included yet
 
