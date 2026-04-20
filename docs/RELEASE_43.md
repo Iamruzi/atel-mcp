@@ -76,6 +76,26 @@ This returns one compact JSON object with:
 - final order state per branch
 - `artifactsDir` for the preserved full payloads of each branch
 
+## Failure diagnostics
+
+When a release branch fails, collect the现场资料 immediately:
+
+```bash
+./scripts/collect-release-diagnostics.sh
+```
+
+Optional:
+- pass a specific release summary directory as the first argument
+- pass a target output directory as the second argument
+
+The diagnostic bundle includes:
+- RC full log and tail log
+- audit full JSONL and tail JSONL
+- latest release summary payloads when available
+- PID snapshot
+- `git rev-parse HEAD`
+- `git status --short`
+
 ## Dispute branch expectations
 
 - `atel_dispute_create` returns `status=open`
