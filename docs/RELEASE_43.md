@@ -62,6 +62,20 @@ This runs:
 
 The script performs cleanup and RC restart before each branch so stale dev state does not leak across runs.
 
+## Operator summary view
+
+For a concise release verdict without scanning the full JSON payloads:
+
+```bash
+./scripts/release-smoke-summary.sh ./.env.release.local
+```
+
+This returns one compact JSON object with:
+- one verdict row per branch
+- key IDs such as `orderId` and `disputeId`
+- final order state per branch
+- `artifactsDir` for the preserved full payloads of each branch
+
 ## Dispute branch expectations
 
 - `atel_dispute_create` returns `status=open`

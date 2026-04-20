@@ -15,6 +15,7 @@
     "smoke:p2p": "node dist/dev/smoke-p2p.js",
     "smoke:order": "node dist/dev/smoke-order.js",
     "smoke:dispute": "node dist/dev/smoke-dispute.js",
+    "smoke:release-summary": "node dist/dev/release-smoke-summary.js",
     "smoke:auto-arbitration": "node dist/dev/smoke-auto-arbitration.js",
     "smoke:env-mismatch": "node dist/dev/smoke-environment-mismatch.js"
   },
