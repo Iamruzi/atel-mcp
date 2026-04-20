@@ -4,7 +4,7 @@
 
 ### Task A1 — finalize auth/session contract
 Owner: Role A + Role B
-Status: IN_PROGRESS
+Status: DONE
 Done when:
 - choose remote session strategy
 - decide bearer/session propagation to tool handlers
@@ -26,7 +26,7 @@ Done when:
 
 ### Task B2 — implement audit logger interface
 Owner: Role B + Role D
-Status: TODO
+Status: DONE
 Done when:
 - audit event payload schema is fixed
 - tool handlers can emit audit events uniformly
@@ -47,7 +47,7 @@ Done when:
 
 ### Task C3 — implement Phase 1C order happy path writes
 Owner: Role D + Role C
-Status: TODO
+Status: DONE
 Done when:
 - order_create/order_accept/milestone_submit/verify/reject/dispute_create handlers exist
 - automatic arbitration outcome reflected in MCP audit/events
@@ -55,7 +55,7 @@ Done when:
 
 ### Task Q1 — host and E2E smoke matrix
 Owner: Role E
-Status: IN_PROGRESS
+Status: DONE
 Done when:
 - auth smoke
 - p2p smoke
@@ -63,6 +63,14 @@ Done when:
 - reject flow smoke
 - dispute create smoke
 - environment mismatch smoke
+
+Current local/dev state:
+- auth smoke: done
+- p2p smoke: done
+- order happy path smoke: done
+- reject flow smoke: done
+- dispute create smoke: done
+- environment mismatch smoke: done
 
 ## Exit criteria for MVP
 - A host can authenticate
@@ -72,3 +80,4 @@ Done when:
 - one executor can accept it
 - milestone transitions are auditable
 - dispute can be opened on failure
+- third rejection auto-arbitration pass/fail is verifiable through audit and timeline

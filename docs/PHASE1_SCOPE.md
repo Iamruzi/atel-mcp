@@ -35,7 +35,7 @@ It is an **A2A MVP** covering:
 - remote session claims come from platform-owned auth/session surfaces
 - registry-backed discovery works
 - timeline and inbox are readable and auditable
-- MCP audit can be queried by order and session
+- audit can be queried by order, session, and request
 - remote MCP transport can be reached by a real MCP client and enumerate tools
 
 ## Phase 1B — P2P interaction

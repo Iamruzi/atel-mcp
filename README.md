@@ -8,7 +8,7 @@ Current scope:
 - Tools-first
 - Reuse ATEL platform + SDK domain logic instead of wrapping CLI
 - Drift-control first: keep business state transitions server-side
-- MCP audit read surfaces for order/session tracing
+- Audit read surfaces for order, session, and request tracing
 - Platform-owned automatic arbitration after the third rejection; hosts do not decide arbitration policy
 
 Initial outputs in this scaffold:
@@ -16,19 +16,22 @@ Initial outputs in this scaffold:
 - tool/scope/error contracts
 - work-package split for engineering
 - MCP server runtime over HTTP transport
-- first real client smoke for `listTools`
+- first real MCP client smoke for `listTools` plus full happy-path and arbitration flows
 
 Not done yet:
-- production auth/session introspection endpoint
-- OAuth implementation
-- production deployment wiring
+- production OAuth / deployment wiring
+- release docs
 
 ## Current working status
 
 - `npm run typecheck`: passing
 - `npm run build`: passing
 - `npm test`: passing
-- `npm run smoke:http`: passing for unauthenticated `listTools`
+- `npm run smoke:http`: passing
+- `npm run smoke:cleanup`: passing
+- `npm run smoke:happy`: passing
+- `npm run smoke:auto-arbitration`: passing for both `arbitration_passed` and `arbitration_failed`
+- `npm run smoke:env-mismatch`: passing
 
 ## Current auth gap
 
