@@ -76,6 +76,23 @@ This returns one compact JSON object with:
 - final order state per branch
 - `artifactsDir` for the preserved full payloads of each branch
 
+## One-shot verify entrypoint
+
+For the normal operator path, use one command:
+
+```bash
+./scripts/release-verify.sh ./.env.release.local
+```
+
+Default behavior:
+- runs the summary verifier
+- returns the compact JSON verdict when all branches pass
+- if verification fails, automatically collects a diagnostic bundle
+
+Optional:
+- `ATEL_MCP_VERIFY_MODE=full` runs the detailed `release-smoke.sh`
+- even in `full` mode, diagnostics are still collected on failure
+
 ## Failure diagnostics
 
 When a release branch fails, collect the现场资料 immediately:
