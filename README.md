@@ -1,59 +1,57 @@
-# atel-mcp
-
-ATEL Remote MCP server workspace.
-
+# @atel/mcp
+ATEL Remote MCP server for A2A messaging, order flow, milestone audit, dispute handling, and platform-owned arbitration.
+## What this is
+`@atel/mcp` is the Remote MCP service layer for ATEL.
+It is designed so hosts and agents use ATEL through a stable server-side contract instead of reproducing business logic locally. That is the main drift-control boundary.
 Current scope:
 - Remote MCP only
+- A2A only in current phase
 - No A2B in Phase 1
 - Tools-first
-- Reuse ATEL platform + SDK domain logic instead of wrapping CLI
-- Drift-control first: keep business state transitions server-side
+- Server-side order state transitions
+- Platform-owned automatic arbitration after the third rejection
 - Audit read surfaces for order, session, and request tracing
-- Platform-owned automatic arbitration after the third rejection; hosts do not decide arbitration policy
-
-Initial outputs in this scaffold:
-- architecture and scope docs
-- tool/scope/error contracts
-- work-package split for engineering
-- MCP server runtime over HTTP transport
-- first real MCP client smoke for `listTools` plus full happy-path and arbitration flows
-
-Not done yet:
-- production OAuth / deployment wiring
-- release docs
-
-## Current working status
-
-- `npm run typecheck`: passing
-- `npm run build`: passing
-- `npm test`: passing
-- `npm run smoke:http`: passing
-- `npm run smoke:cleanup`: passing
-- `npm run smoke:happy`: passing
-- `npm run smoke:auto-arbitration`: passing for both `arbitration_passed` and `arbitration_failed`
-- `npm run smoke:env-mismatch`: passing
-
-## Current auth gap
-
-The MCP server currently tries:
-- `GET /auth/v1/session`
-- then falls back to `GET /auth/v1/me`
-
-Today, fallback to `/auth/v1/me` is enough to confirm `did`, but it does **not** provide:
+## Run on a server
+```bash
+npm install
+npm run build
+HOST=0.0.0.0 PORT=8787 npm run start:remote
+```
+Main endpoints:
+- `GET /healthz`
+- `GET /.well-known/atel-mcp.json`
+- `POST /mcp`
+## Release-candidate flow on 43
+```bash
+cp .env.release.example .env.release.local
+./scripts/run-release-candidate.sh ./.env.release.local
+./scripts/release-verify.sh ./.env.release.local
+```
+## Host-side usage
+Remote MCP clients should connect to:
+```text
+https://<your-host>/mcp
+```
+And send:
+```text
+Authorization: Bearer <ATEL access token>
+```
+Metadata discovery endpoint:
+```text
+https://<your-host>/.well-known/atel-mcp.json
+```
+## Current tool groups
+- `identity`: whoami, agent register, agent search
+- `wallet`: balance, deposit info
+- `messaging`: contacts, inbox, send, ack
+- `order`: create, accept, get, list, timeline
+- `milestone`: list, submit, verify, reject
+- `dispute`: get, list, create
+- `audit`: order, session, request audit queries
+## Production notes
+Current auth fallback can confirm `did`, but production still needs a dedicated platform-owned session or introspection surface that returns:
 - scopes
 - environment
 - session id
 - token expiry semantics
-
-For production Remote MCP, platform must expose a dedicated session/introspection surface such as:
-- `GET /auth/v1/session`
-- or `POST /auth/v1/introspect`
-
-The Remote MCP server should then derive:
-- `did`
-- `environment`
-- `scopes`
-- `sessionId`
-- `expiresAt`
-
-from that server-owned source, not from host-provided headers.
+Until that is available, this repo is suitable for release-candidate validation and Remote MCP integration work, but not yet a finished production auth surface.
