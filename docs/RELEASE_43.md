@@ -56,10 +56,18 @@ This runs:
 1. cleanup
 2. MCP HTTP smoke
 3. happy-path smoke
-4. auto-arbitration passed branch
-5. auto-arbitration failed branch
+4. dispute smoke
+5. auto-arbitration passed branch
+6. auto-arbitration failed branch
 
 The script performs cleanup and RC restart before each branch so stale dev state does not leak across runs.
+
+## Dispute branch expectations
+
+- `atel_dispute_create` returns `status=open`
+- `atel_dispute_get` returns the created `disputeId`
+- `atel_dispute_list` contains the created dispute
+- order audit contains `dispute.created`
 
 ## Release discipline
 

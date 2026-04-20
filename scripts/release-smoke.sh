@@ -30,5 +30,6 @@ run_case() {
 }
 
 run_case "happy-path" node dist/dev/smoke-happy-path.js
+run_case "dispute" node dist/dev/smoke-dispute.js
 run_case "auto-arbitration-passed" env ATEL_MCP_ARBITRATION_EXPECTED=passed node dist/dev/smoke-auto-arbitration.js
 run_case "auto-arbitration-failed" env ATEL_MCP_ARBITRATION_EXPECTED=failed node dist/dev/smoke-auto-arbitration.js

@@ -45,7 +45,7 @@ async function main() {
   const executor = await createClient(executorToken, serverUrl);
 
   try {
-    const createResult = await requester.callTool({
+    const createResult = parseTextPayload(await requester.callTool({
       name: 'atel_order_create',
       arguments: {
         executorDid,
@@ -53,31 +53,84 @@ async function main() {
         description: `MCP dispute smoke ${Date.now()}: provide a short gold trend view.`,
         priceUsdc: 0,
       },
-    });
+    }));
 
-    const created = parseTextPayload(createResult);
-    const orderId = created?.orderId;
-    if (!orderId) throw new Error(`Missing orderId in create result: ${JSON.stringify(created)}`);
+    const orderId = createResult?.orderId;
+    if (!orderId) throw new Error(`Missing orderId in create result: ${JSON.stringify(createResult)}`);
 
-    const acceptResult = await executor.callTool({
+    const acceptResult = parseTextPayload(await executor.callTool({
       name: 'atel_order_accept',
       arguments: { orderId },
-    });
+    }));
 
-    const disputeResult = await requester.callTool({
+    const disputeResult = parseTextPayload(await requester.callTool({
       name: 'atel_dispute_create',
       arguments: {
         orderId,
         reason: 'quality',
       },
-    });
+    }));
+    const disputeId = String(disputeResult?.disputeId ?? '').trim();
+    if (!disputeId) throw new Error(`Missing disputeId in dispute result: ${JSON.stringify(disputeResult)}`);
+
+    const disputeDetail = parseTextPayload(await requester.callTool({
+      name: 'atel_dispute_get',
+      arguments: { disputeId },
+    }));
+    const disputeList = parseTextPayload(await requester.callTool({ name: 'atel_dispute_list', arguments: {} }));
+    const order = parseTextPayload(await requester.callTool({
+      name: 'atel_order_get',
+      arguments: { orderId },
+    }));
+    const timeline = parseTextPayload(await requester.callTool({
+      name: 'atel_order_timeline',
+      arguments: { orderId },
+    }));
+    const orderAudit = parseTextPayload(await requester.callTool({
+      name: 'atel_audit_order_get',
+      arguments: { orderId, limit: 50 },
+    }));
+
+    if (String(disputeResult?.status ?? '').toLowerCase() !== 'open') {
+      throw new Error(`Expected dispute status=open, got ${JSON.stringify(disputeResult)}`);
+    }
+    if (String(disputeDetail?.disputeId ?? '') !== disputeId) {
+      throw new Error(`Dispute detail did not match disputeId=${disputeId}: ${JSON.stringify(disputeDetail)}`);
+    }
+    if (String(disputeDetail?.orderId ?? '') !== orderId) {
+      throw new Error(`Dispute detail did not match orderId=${orderId}: ${JSON.stringify(disputeDetail)}`);
+    }
+
+    const disputeItems = Array.isArray(disputeList?.disputes)
+      ? disputeList.disputes
+      : Array.isArray(disputeList)
+        ? disputeList
+        : [];
+    if (!disputeItems.some((item: any) => String(item?.disputeId ?? '') === disputeId)) {
+      throw new Error(`Dispute list did not include disputeId=${disputeId}`);
+    }
+
+    const timelineEvents = Array.isArray(timeline?.events) ? timeline.events : [];
+    const orderAuditEvents = Array.isArray(orderAudit?.events) ? orderAudit.events : [];
+    if (timelineEvents.length === 0) {
+      throw new Error(`Expected timeline events for disputed order ${orderId}`);
+    }
+    if (!orderAuditEvents.some((event: any) => String(event?.type ?? '').toLowerCase() === 'dispute.created')) {
+      throw new Error(`Expected dispute.created in order audit for ${orderId}`);
+    }
 
     console.log(JSON.stringify({
       ok: true,
       orderId,
+      disputeId,
       createResult,
       acceptResult,
       disputeResult,
+      disputeDetail,
+      disputeList,
+      order,
+      timeline,
+      orderAudit,
     }, null, 2));
   } finally {
     await requester.close();
