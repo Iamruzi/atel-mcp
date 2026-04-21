@@ -25,6 +25,11 @@ const DEFAULT_CONFIG = {
 };
 
 const sessionCache = new WeakMap();
+const OAUTH_CACHE_PATH = process.env.ATEL_MCP_OAUTH_CACHE_PATH || path.join(
+  process.env.HOME || process.env.USERPROFILE || ".",
+  ".openclaw",
+  "atel-mcp-oauth-cache.json",
+);
 const LOCAL_SIGNED_TOOLS = new Set([
   "atel_order_create",
   "atel_order_accept",
@@ -63,6 +68,67 @@ function makePkce() {
   const verifier = base64Url(crypto.randomBytes(32));
   const challenge = base64Url(crypto.createHash("sha256").update(verifier).digest());
   return { verifier, challenge };
+}
+
+function ensureParentDir(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function readOauthCacheFile() {
+  try {
+    if (!fs.existsSync(OAUTH_CACHE_PATH)) {
+      return {};
+    }
+    const parsed = JSON.parse(fs.readFileSync(OAUTH_CACHE_PATH, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOauthCacheFile(cache) {
+  ensureParentDir(OAUTH_CACHE_PATH);
+  fs.writeFileSync(OAUTH_CACHE_PATH, JSON.stringify(cache, null, 2));
+}
+
+function buildOauthCacheKey(config, identity, scopes) {
+  return [
+    normalizeBaseUrl(config.serverBaseUrl),
+    normalizeBaseUrl(config.platformBaseUrl),
+    identity.did,
+    scopes.join(" "),
+  ].join("|");
+}
+
+function getPersistedOauthCache(config, identity, scopes) {
+  const cache = readOauthCacheFile();
+  const key = buildOauthCacheKey(config, identity, scopes);
+  const entry = cache[key];
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  return { key, entry };
+}
+
+function savePersistedOauthCache(config, identity, scopes, patch) {
+  const cache = readOauthCacheFile();
+  const key = buildOauthCacheKey(config, identity, scopes);
+  cache[key] = {
+    ...(cache[key] || {}),
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  writeOauthCacheFile(cache);
+  return cache[key];
+}
+
+function clearPersistedOauthCache(config, identity, scopes) {
+  const cache = readOauthCacheFile();
+  const key = buildOauthCacheKey(config, identity, scopes);
+  if (cache[key]) {
+    delete cache[key];
+    writeOauthCacheFile(cache);
+  }
 }
 
 function readPluginConfig(runtime) {
@@ -166,23 +232,67 @@ async function getAccessToken(runtime) {
     throw new Error(`serializePayload missing from ${sdkDistPath}`);
   }
 
-  const { verifier, challenge } = makePkce();
+  const persisted = getPersistedOauthCache(config, identity, config.scopes);
   const redirectUri = "https://atel.local/callback";
+  const { verifier, challenge } = makePkce();
 
-  const registerResponse = await fetch(`${config.serverBaseUrl}/register`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      client_name: "OpenClaw ATEL MCP Bridge",
-      redirect_uris: [redirectUri],
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    }),
-  });
-  const registeredClient = await readJson(registerResponse);
-  if (!registerResponse.ok) {
-    throw new Error(`MCP register failed: ${registerResponse.status} ${JSON.stringify(registeredClient)}`);
+  if (
+    persisted?.entry?.client?.client_id &&
+    typeof persisted.entry?.refreshToken === "string" &&
+    persisted.entry.refreshToken
+  ) {
+    const refreshParams = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: String(persisted.entry.client.client_id),
+      refresh_token: persisted.entry.refreshToken,
+    });
+    const refreshResponse = await fetch(`${config.serverBaseUrl}/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: refreshParams.toString(),
+    });
+    const refreshPayload = await readJson(refreshResponse);
+    if (refreshResponse.ok && typeof refreshPayload?.access_token === "string") {
+      const nextRefreshToken =
+        typeof refreshPayload?.refresh_token === "string" && refreshPayload.refresh_token
+          ? refreshPayload.refresh_token
+          : persisted.entry.refreshToken;
+      savePersistedOauthCache(config, identity, config.scopes, {
+        client: persisted.entry.client,
+        refreshToken: nextRefreshToken,
+      });
+      sessionCache.set(runtime, {
+        accessToken: refreshPayload.access_token,
+        expiresAt: Date.now() + (Number(refreshPayload.expires_in || 3600) * 1000),
+        initialized: false,
+        sessionId: null,
+        requestSeq: 0,
+      });
+      return refreshPayload.access_token;
+    }
+
+    clearPersistedOauthCache(config, identity, config.scopes);
+  }
+
+  const registrationBody = {
+    client_name: "OpenClaw ATEL MCP Bridge",
+    redirect_uris: [redirectUri],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+  };
+
+  let registeredClient = persisted?.entry?.client ?? null;
+  if (!registeredClient?.client_id) {
+    const registerResponse = await fetch(`${config.serverBaseUrl}/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(registrationBody),
+    });
+    registeredClient = await readJson(registerResponse);
+    if (!registerResponse.ok) {
+      throw new Error(`MCP register failed: ${registerResponse.status} ${JSON.stringify(registeredClient)}`);
+    }
   }
 
   const authorizeUrl = new URL(`${config.serverBaseUrl}/authorize`);
@@ -266,6 +376,11 @@ async function getAccessToken(runtime) {
   if (!tokenResponse.ok || typeof tokenPayload?.access_token !== "string") {
     throw new Error(`Token exchange failed: ${tokenResponse.status} ${JSON.stringify(tokenPayload)}`);
   }
+
+  savePersistedOauthCache(config, identity, config.scopes, {
+    client: registeredClient,
+    refreshToken: typeof tokenPayload?.refresh_token === "string" ? tokenPayload.refresh_token : undefined,
+  });
 
   sessionCache.set(runtime, {
     accessToken: tokenPayload.access_token,

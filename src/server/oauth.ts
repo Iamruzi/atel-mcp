@@ -35,6 +35,9 @@ export function createOAuthBridge() {
     scopesSupported: config.defaultRemoteScopes,
     resourceServerUrl: mcpServerUrl,
     resourceName: config.oauthResourceName,
+    clientRegistrationOptions: {
+      rateLimit: config.disableRegisterRateLimit ? false : undefined,
+    },
   });
 
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(mcpServerUrl);
@@ -124,3 +127,4 @@ export function createOAuthBridge() {
     interactiveStatusHandler,
   };
 }
+

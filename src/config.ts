@@ -17,6 +17,7 @@ export interface AtelMcpConfig {
   environment: AtelEnvironmentProfile;
   defaultRemoteScopes: AtelScope[];
   allowCustomRemoteMcp: boolean;
+  disableRegisterRateLimit?: boolean;
   auditLogPath?: string;
 }
 
@@ -81,6 +82,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     environment,
     defaultRemoteScopes: parseScopes(env.ATEL_MCP_DEFAULT_SCOPES),
     allowCustomRemoteMcp: env.ALLOW_CUSTOM_REMOTE_MCP === 'true',
+    disableRegisterRateLimit: env.ATEL_MCP_DISABLE_REGISTER_RATE_LIMIT === 'true',
     auditLogPath: env.ATEL_MCP_AUDIT_LOG_PATH?.trim() || undefined,
   };
 }
+
