@@ -1,0 +1,16 @@
+{
+  "name": "@atel/openclaw-plugin-atel-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenClaw plugin that exposes ATEL Remote MCP tools through a single bridge tool",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "src/",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.2.24"
+  }
+}

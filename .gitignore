@@ -6,3 +6,4 @@ dist/
 .env.release.local
 .tmp-*
 tmp-oauth-remote-*.mjs
+*.tar

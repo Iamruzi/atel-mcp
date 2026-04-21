@@ -1,0 +1,36 @@
+{
+  "id": "atel-mcp",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "serverBaseUrl": {
+        "type": "string",
+        "description": "Remote ATEL MCP public base URL"
+      },
+      "identityPath": {
+        "type": "string",
+        "description": "Path to ATEL identity.json"
+      },
+      "sdkDistPath": {
+        "type": "string",
+        "description": "Path to ATEL SDK dist entry used for serializePayload"
+      },
+      "naclPath": {
+        "type": "string",
+        "description": "Path to tweetnacl runtime used for DID signing"
+      },
+      "platformBaseUrl": {
+        "type": "string",
+        "description": "ATEL platform base URL for /auth/v1/verify"
+      },
+      "scopes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Requested OAuth scopes for the MCP bridge"
+      }
+    }
+  }
+}
