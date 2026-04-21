@@ -159,6 +159,9 @@ function resolveIdentityPath(configuredPath) {
   const candidates = [
     configuredPath,
     "/root/.openclaw/workspace/atel-sdk/.atel/identity.json",
+    "/root/.openclaw/workspace-executor/atel-sdk/.atel/identity.json",
+    "/root/.openclaw/workspace/atel-sdk/shrimp1-identity.json",
+    "/root/.openclaw/workspace-executor/atel-sdk/shrimp1-identity.json",
     "/root/.openclaw/workspace/.atel/identity.json",
     "/root/.atel/identity.json",
   ].filter(Boolean);
@@ -764,4 +767,3 @@ export function createAtelMcpTool(runtime) {
     },
   };
 }
-
