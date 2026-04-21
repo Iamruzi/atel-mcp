@@ -18,7 +18,9 @@
     "smoke:remote-oauth": "node dist/dev/smoke-remote-oauth.js",
     "smoke:release-summary": "node dist/dev/release-smoke-summary.js",
     "smoke:auto-arbitration": "node dist/dev/smoke-auto-arbitration.js",
-    "smoke:env-mismatch": "node dist/dev/smoke-environment-mismatch.js"
+    "smoke:env-mismatch": "node dist/dev/smoke-environment-mismatch.js",
+    "smoke:plugin-order": "node scripts/smoke-openclaw-plugin-order.mjs",
+    "smoke:plugin-dispute": "node scripts/smoke-openclaw-plugin-dispute.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -31,3 +33,4 @@
     "typescript": "^5.9.2"
   }
 }
+
