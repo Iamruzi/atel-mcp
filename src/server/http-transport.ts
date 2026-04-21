@@ -6,21 +6,37 @@ import { createAtelMcpServer } from './mcp-server.js';
 import { extractRequestMeta } from './request-meta.js';
 import { createAuditSink } from '../audit/file-sink.js';
 import { MVP_MANIFEST } from './manifest.js';
+import { createOAuthBridge } from './oauth.js';
 
 const MCP_VERSION = '0.1.0';
 
+function routePath(basePath: string, path: string) {
+  if (!basePath) return path;
+  if (path === '/') return basePath;
+  return `${basePath}${path}`;
+}
+
+function buildAllowedHosts(config: ReturnType<typeof loadConfig>) {
+  const allowedHosts = new Set<string>(['127.0.0.1', 'localhost']);
+  allowedHosts.add(config.host);
+  allowedHosts.add(new URL(config.publicBaseUrl).hostname);
+  allowedHosts.add(new URL(config.oauthIssuerUrl).hostname);
+  return [...allowedHosts].filter(Boolean);
+}
+
 function buildServiceMetadata() {
   const config = loadConfig();
-  const baseHttpUrl = `http://${config.host}:${config.port}`;
   return {
     name: 'atel-mcp',
     version: MCP_VERSION,
     transport: 'streamable-http',
     environment: config.environment,
-    mcpPath: '/mcp',
-    mcpUrl: `${baseHttpUrl}/mcp`,
-    healthUrl: `${baseHttpUrl}/healthz`,
-    metadataUrl: `${baseHttpUrl}/.well-known/atel-mcp.json`,
+    mcpPath: routePath(config.routeBasePath, '/mcp'),
+    mcpUrl: `${config.publicBaseUrl}/mcp`,
+    healthUrl: `${config.publicBaseUrl}/healthz`,
+    metadataUrl: `${config.publicBaseUrl}/.well-known/atel-mcp.json`,
+    oauthProtectedResourceUrl: `${config.publicBaseUrl}/.well-known/oauth-protected-resource/mcp`,
+    oauthAuthorizationServerUrl: `${config.oauthIssuerUrl}/.well-known/oauth-authorization-server`,
     platformBaseUrl: config.platformBaseUrl,
     registryBaseUrl: config.registryBaseUrl,
     relayBaseUrl: config.relayBaseUrl,
@@ -34,34 +50,45 @@ function buildServiceMetadata() {
 export function createHttpTransportApp() {
   const config = loadConfig();
   const audit = createAuditSink(config);
-  const app = createMcpExpressApp({ host: config.host });
+  const app = createMcpExpressApp({ host: config.host, allowedHosts: buildAllowedHosts(config) });
+  const oauth = createOAuthBridge();
+  const route = (path: string) => routePath(config.routeBasePath, path);
 
-  app.get('/', async (_req: Request, res: Response) => {
+  // Production should only trust the local reverse proxy chain by default.
+  app.set('trust proxy', config.trustProxy);
+
+  app.use(config.routeBasePath || '/', oauth.authRouter);
+  app.get(route('/oauth/authorize/interactive'), oauth.interactiveAuthorizeHandler);
+  app.get(route('/oauth/authorize/interactive/status/:sessionId'), oauth.interactiveStatusHandler);
+
+  app.get(route('/'), async (_req: Request, res: Response) => {
     res.json({
       ok: true,
       service: buildServiceMetadata(),
       usage: {
-        transport: 'POST JSON-RPC requests to /mcp',
-        auth: 'Send Authorization: Bearer <ATEL access token>',
+        transport: `POST JSON-RPC requests to ${route('/mcp')}`,
+        auth: 'Unauthenticated requests receive OAuth metadata through WWW-Authenticate.',
       },
     });
   });
 
-  app.get('/healthz', async (_req: Request, res: Response) => {
+  app.get(route('/healthz'), async (_req: Request, res: Response) => {
     res.json({
       ok: true,
       name: 'atel-mcp',
       version: MCP_VERSION,
       environment: config.environment,
       platformBaseUrl: config.platformBaseUrl,
+      publicBaseUrl: config.publicBaseUrl,
+      oauthIssuerUrl: config.oauthIssuerUrl,
     });
   });
 
-  app.get('/.well-known/atel-mcp.json', async (_req: Request, res: Response) => {
+  app.get(route('/.well-known/atel-mcp.json'), async (_req: Request, res: Response) => {
     res.json(buildServiceMetadata());
   });
 
-  app.post('/mcp', async (req: Request, res: Response) => {
+  app.post(route('/mcp'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
     const meta = extractRequestMeta(req);
     const server = await createAtelMcpServer({ ...meta, audit });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -80,11 +107,11 @@ export function createHttpTransportApp() {
     }
   });
 
-  app.get('/mcp', async (_req: Request, res: Response) => {
+  app.get(route('/mcp'), oauth.bearerMiddleware, async (_req: Request, res: Response) => {
     res.writeHead(405).end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }));
   });
 
-  app.delete('/mcp', async (_req: Request, res: Response) => {
+  app.delete(route('/mcp'), oauth.bearerMiddleware, async (_req: Request, res: Response) => {
     res.writeHead(405).end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }));
   });
 

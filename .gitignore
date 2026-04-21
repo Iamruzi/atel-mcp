@@ -4,3 +4,5 @@ dist/
 .tmp/
 .runtime/
 .env.release.local
+.tmp-*
+tmp-oauth-remote-*.mjs

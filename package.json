@@ -1,20 +1,13 @@
 {
-  "name": "@atel/mcp",
+  "name": "atel-mcp",
   "version": "0.1.0",
-  "private": false,
-  "description": "ATEL Remote MCP server",
+  "private": true,
+  "description": "ATEL Remote MCP server scaffold",
   "type": "module",
-  "files": [
-    "dist",
-    "scripts",
-    "README.md",
-    ".env.release.example"
-  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/server/http.js",
-    "start:remote": "node dist/server/http.js",
     "test": "node --test dist/tests/**/*.test.js",
     "smoke:cleanup": "node dist/dev/smoke-cleanup.js",
     "smoke:happy": "node dist/dev/smoke-happy-path.js",
@@ -24,24 +17,8 @@
     "smoke:dispute": "node dist/dev/smoke-dispute.js",
     "smoke:release-summary": "node dist/dev/release-smoke-summary.js",
     "smoke:auto-arbitration": "node dist/dev/smoke-auto-arbitration.js",
-    "smoke:env-mismatch": "node dist/dev/smoke-environment-mismatch.js",
-    "verify:release": "./scripts/release-verify.sh ./.env.release.local"
+    "smoke:env-mismatch": "node dist/dev/smoke-environment-mismatch.js"
   },
-  "keywords": [
-    "atel",
-    "mcp",
-    "remote-mcp",
-    "agent-commerce"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Iamruzi/atel-mcp.git"
-  },
-  "homepage": "https://github.com/Iamruzi/atel-mcp",
-  "bugs": {
-    "url": "https://github.com/Iamruzi/atel-mcp/issues"
-  },
-  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.1",

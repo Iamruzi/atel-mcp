@@ -17,6 +17,7 @@ Use 43 as the release-debug host for ATEL MCP until:
 - process: local Node service
 - audit: JSONL written under `.runtime/audit/`
 - upstream: configurable via env file
+- public remote route: optional path-prefixed reverse proxy such as `/atel-mcp`
 
 ## Recommended env file
 
@@ -27,6 +28,21 @@ Typical local/dev release-candidate copy:
 - `.env.release.local`
 
 Do not commit `.env.release.local`.
+
+For public-host testing on 43, set:
+
+```bash
+ATEL_MCP_PUBLIC_BASE_URL=http://43.160.230.129/atel-mcp
+ATEL_MCP_OAUTH_ISSUER_URL=http://43.160.230.129/atel-mcp
+ATEL_MCP_URL=http://127.0.0.1:8787/atel-mcp/mcp
+```
+
+This keeps:
+- MCP resource URL
+- OAuth issuer metadata
+- interactive authorization page
+
+under the same public path prefix.
 
 ## Start / stop
 
@@ -146,5 +162,4 @@ Before every release-debug run on 43:
 ## Not included yet
 
 - 47 production deployment
-- public reverse-proxy route
-- production OAuth rollout
+- production TLS/domain rollout
