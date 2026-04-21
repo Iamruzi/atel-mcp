@@ -25,6 +25,13 @@ const DEFAULT_CONFIG = {
 };
 
 const sessionCache = new WeakMap();
+const LOCAL_SIGNED_TOOLS = new Set([
+  "atel_order_create",
+  "atel_order_accept",
+  "atel_milestone_submit",
+  "atel_milestone_verify",
+  "atel_dispute_create",
+]);
 
 function textResult(data, isError = false) {
   return {
@@ -270,6 +277,194 @@ async function getAccessToken(runtime) {
   return tokenPayload.access_token;
 }
 
+async function loadSigningContext(runtime) {
+  const config = readPluginConfig(runtime);
+  const identityPath = resolveIdentityPath(config.identityPath);
+  const sdkDistPath = requireReadableFile(config.sdkDistPath, "ATEL SDK dist");
+  const naclPath = requireReadableFile(config.naclPath, "tweetnacl");
+  const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+  const secretKey = decodeSecretKey(identity.secretKey);
+
+  const sdkModule = await import(pathToFileURL(path.resolve(sdkDistPath)).href);
+  const naclModule = await import(pathToFileURL(path.resolve(naclPath)).href);
+  const serializePayload = sdkModule.serializePayload;
+  const nacl = naclModule.default ?? naclModule;
+  if (typeof serializePayload !== "function") {
+    throw new Error(`serializePayload missing from ${sdkDistPath}`);
+  }
+
+  return {
+    config,
+    identity,
+    secretKey,
+    serializePayload,
+    nacl,
+  };
+}
+
+function buildSignedEnvelope(signing, payload) {
+  const timestamp = new Date().toISOString();
+  const signable = signing.serializePayload({
+    payload,
+    did: signing.identity.did,
+    timestamp,
+  });
+  const signature = Buffer.from(
+    signing.nacl.sign.detached(Buffer.from(signable), signing.secretKey),
+  ).toString("base64");
+
+  return {
+    did: signing.identity.did,
+    payload,
+    timestamp,
+    signature,
+  };
+}
+
+async function signedPlatformRequest(runtime, method, pathName, payload) {
+  const signing = await loadSigningContext(runtime);
+  const response = await fetch(`${signing.config.platformBaseUrl}${pathName}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify(buildSignedEnvelope(signing, payload)),
+  });
+  const body = await readJson(response);
+  if (!response.ok) {
+    throw new Error(`Platform ${method} ${pathName} failed: ${response.status} ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+function normalizeOrderCreateArgs(input) {
+  return {
+    executorDid: String(input?.executorDid || "").trim(),
+    capabilityType: String(input?.capabilityType || "").trim(),
+    description: String(input?.description || "").trim(),
+    priceUsdc: Number(input?.priceUsdc ?? 0),
+    chain: typeof input?.chain === "string" && input.chain.trim() ? input.chain.trim() : undefined,
+  };
+}
+
+function normalizeMilestoneArgs(input) {
+  return {
+    orderId: String(input?.orderId || "").trim(),
+    index: Number(input?.index),
+    content: typeof input?.content === "string" ? input.content : "",
+    approved: Boolean(input?.approved),
+    feedback: typeof input?.feedback === "string" ? input.feedback : "",
+  };
+}
+
+async function callLocalSignedTool(runtime, toolName, rawArgs) {
+  const args = parseArgs(rawArgs);
+
+  switch (toolName) {
+    case "atel_order_create": {
+      const input = normalizeOrderCreateArgs(args);
+      if (!input.executorDid || !input.capabilityType || !input.description || !Number.isFinite(input.priceUsdc) || input.priceUsdc < 0) {
+        throw new Error("atel_order_create requires executorDid, capabilityType, description, and priceUsdc >= 0");
+      }
+      const payload = {
+        executorDid: input.executorDid,
+        capabilityType: input.capabilityType,
+        priceAmount: input.priceUsdc,
+        priceCurrency: "USD",
+        pricingModel: "per_task",
+        description: input.description,
+      };
+      if (input.chain) {
+        payload.chain = input.chain;
+      }
+      return {
+        tool: toolName,
+        mode: "local-signed",
+        structuredContent: await signedPlatformRequest(runtime, "POST", "/trade/v1/order", payload),
+        content: [],
+        isError: false,
+      };
+    }
+    case "atel_order_accept": {
+      const orderId = String(args?.orderId || "").trim();
+      if (!orderId) {
+        throw new Error("atel_order_accept requires orderId");
+      }
+      return {
+        tool: toolName,
+        mode: "local-signed",
+        structuredContent: await signedPlatformRequest(runtime, "POST", `/trade/v1/order/${encodeURIComponent(orderId)}/accept`, {}),
+        content: [],
+        isError: false,
+      };
+    }
+    case "atel_milestone_submit": {
+      const input = normalizeMilestoneArgs(args);
+      if (!input.orderId || !Number.isInteger(input.index) || input.index < 0 || input.index > 9 || !input.content) {
+        throw new Error("atel_milestone_submit requires orderId, index, and content");
+      }
+      return {
+        tool: toolName,
+        mode: "local-signed",
+        structuredContent: await signedPlatformRequest(
+          runtime,
+          "POST",
+          `/trade/v1/order/${encodeURIComponent(input.orderId)}/milestone/${input.index}/submit`,
+          { resultSummary: input.content },
+        ),
+        content: [],
+        isError: false,
+      };
+    }
+    case "atel_milestone_verify": {
+      const input = normalizeMilestoneArgs(args);
+      if (!input.orderId || !Number.isInteger(input.index) || input.index < 0 || input.index > 9) {
+        throw new Error("atel_milestone_verify requires orderId and index");
+      }
+      if (!input.approved && !input.feedback) {
+        throw new Error("atel_milestone_verify requires feedback when approved=false");
+      }
+      return {
+        tool: toolName,
+        mode: "local-signed",
+        structuredContent: await signedPlatformRequest(
+          runtime,
+          "POST",
+          `/trade/v1/order/${encodeURIComponent(input.orderId)}/milestone/${input.index}/verify`,
+          {
+            passed: input.approved,
+            rejectReason: input.approved ? "" : input.feedback,
+          },
+        ),
+        content: [],
+        isError: false,
+      };
+    }
+    case "atel_dispute_create": {
+      const orderId = String(args?.orderId || "").trim();
+      const reason = String(args?.reason || "").trim();
+      const description = typeof args?.description === "string" ? args.description.trim() : "";
+      if (!orderId || !reason) {
+        throw new Error("atel_dispute_create requires orderId and reason");
+      }
+      return {
+        tool: toolName,
+        mode: "local-signed",
+        structuredContent: await signedPlatformRequest(runtime, "POST", "/dispute/v1/open", {
+          orderId,
+          reason,
+          description,
+        }),
+        content: [],
+        isError: false,
+      };
+    }
+    default:
+      throw new Error(`Unsupported local-signed tool: ${toolName}`);
+  }
+}
+
 async function sendMcpRequest(runtime, method, params = {}) {
   const config = readPluginConfig(runtime);
   const cached = sessionCache.get(runtime);
@@ -384,6 +579,10 @@ function parseArgs(raw) {
 }
 
 async function callRemoteTool(runtime, toolName, args) {
+  if (LOCAL_SIGNED_TOOLS.has(toolName)) {
+    return callLocalSignedTool(runtime, toolName, args);
+  }
+
   const result = await sendMcpRequest(runtime, "tools/call", {
     name: toolName,
     arguments: parseArgs(args),
@@ -450,3 +649,4 @@ export function createAtelMcpTool(runtime) {
     },
   };
 }
+
