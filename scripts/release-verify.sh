@@ -18,7 +18,18 @@ fi
 
 cd "$ROOT_DIR"
 
+ENV_PLATFORM_BASE_URL="$(bash -lc "set -a && source \"$ENV_FILE\" && set +a && printf '%s' \"\$ATEL_PLATFORM_BASE_URL\"")"
+
+run_production_verify() {
+  npm run build >/dev/null
+  bash -lc "set -a && source \"$ENV_FILE\" && set +a && node dist/dev/smoke-remote-oauth.js"
+}
+
 run_verify() {
+  if [[ "$ENV_PLATFORM_BASE_URL" == "https://api.atelai.org" ]]; then
+    run_production_verify
+    return 0
+  fi
   if [[ "$VERIFY_MODE" == "full" ]]; then
     ./scripts/release-smoke.sh "$ENV_FILE"
   else
