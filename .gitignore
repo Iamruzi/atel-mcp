@@ -4,6 +4,8 @@ dist/
 .tmp/
 .runtime/
 .env.release.local
+.env.release.*.local
+.env.release*.bak-*
 .tmp-*
 tmp-oauth-remote-*.mjs
 *.tar

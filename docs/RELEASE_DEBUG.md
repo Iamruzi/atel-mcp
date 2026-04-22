@@ -1,134 +1,100 @@
-# ATEL MCP Release Debug Checklist
+# ATEL MCP Release Debug Status
 
 ## Current status
 
-The local/dev A2A MCP path is functionally complete for the first release slice:
+The ATEL MCP release-candidate path is now split into two verified modes on 43:
+
+### 1. Local-test upstream
+
+Used for branch-level release smoke and failure-path debugging.
+
+Verified coverage:
 - bearer auth/session resolution
 - agent register/search
 - P2P send/inbox/ack
-- order happy path to settled
-- reject x3 -> auto-arbitration passed/failed
-- audit write + read (order/session/request)
+- order happy path
+- dispute branch
+- reject x3 -> arbitration passed
+- reject x3 -> arbitration failed
+- audit write + read
 - cleanup discipline
 - environment mismatch guard
 
-What is **not** done yet is release packaging and production wiring.
+### 2. Production upstream
 
-## Release blockers
+Used for real public remote MCP verification against the official ATEL environment.
 
-### B1. Production auth/session contract is not final
+Verified coverage:
+- public health endpoint
+- OAuth authorization-server metadata
+- OAuth protected-resource metadata
+- client registration
+- interactive authorization challenge
+- platform verify through `https://api.atelai.org/auth/v1/verify`
+- token exchange
+- `initialize`
+- `tools/list`
+- authenticated `atel_whoami`
+
+## Resolved release blockers
+
+### R1. Auth/session contract is good enough for this release slice
+
 Current MCP runtime uses:
 - `GET /auth/v1/session`
 - fallback `GET /auth/v1/me`
 
-For release, production must provide a stable session/introspection contract that returns at least:
-- `did`
-- `environment`
-- `scopes`
-- `sessionId`
-- `expiresAt`
-- optional `clientId`
-
 Release position:
-- fallback to `/auth/v1/me` is acceptable for dev
-- **not acceptable as the only production contract**
+- current contract is sufficient for the present Remote MCP release-candidate path
+- fallback still exists for compatibility, but the release path is no longer blocked on session resolution
 
-### B2. Production deployment wiring is not defined
-The service runs locally with:
-- `node dist/server/http.js`
-- default `HOST=127.0.0.1`
-- default `PORT=8787`
+### R2. 43 deployment wiring exists and is repeatable
 
-Missing for release:
-- service unit or PM2 entry
-- reverse proxy route / public MCP URL
-- environment file layout
-- health/debug check commands
-- restart / rollback steps
+Current operator flow includes:
+- `scripts/run-release-candidate.sh`
+- `scripts/stop-release-candidate.sh`
+- `scripts/healthcheck.sh`
+- `scripts/release-verify.sh`
+- `scripts/collect-release-diagnostics.sh`
+- committed env examples for both local-test and production-upstream RC modes
 
-### B3. Release docs are missing
-Still needed:
-- operator deployment guide
-- env var contract
-- smoke commands for post-deploy validation
-- rollback procedure
+### R3. Operator docs exist
 
-## Proposed first release slice
+Release guidance now exists in:
+- `docs/RELEASE_43.md`
+- `docs/DOMAIN_CUTOVER.md`
+- client docs under `docs/clients/`
 
-Release only the already-verified A2A MVP:
-- `atel_whoami`
-- `atel_agent_register`
-- `atel_agent_search`
-- `atel_balance`
-- `atel_deposit_info`
-- `atel_contacts_list`
-- `atel_inbox_list`
-- `atel_send_message`
-- `atel_ack`
-- `atel_order_get`
-- `atel_order_list`
-- `atel_order_timeline`
-- `atel_order_create`
-- `atel_order_accept`
-- `atel_milestone_list`
-- `atel_milestone_submit`
-- `atel_milestone_verify`
-- `atel_milestone_reject`
-- `atel_dispute_get`
-- `atel_dispute_list`
-- `atel_dispute_create`
-- `atel_audit_order_get`
-- `atel_audit_session_get`
-- `atel_audit_request_get`
+## Remaining release blockers
 
-Do not expand scope for first release:
-- no A2B
-- no public escrow/confirm/settle tools
-- no host-owned arbitration decision path
+### B1. Final public domain is not cut over yet
 
-## Required environment variables
+Current public RC host is still:
+- `https://43-160-230-129.sslip.io`
 
-Current runtime expects:
-- `ATEL_PLATFORM_BASE_URL`
-- `ATEL_REGISTRY_BASE_URL`
-- `ATEL_RELAY_BASE_URL`
-- `ATEL_MCP_DEFAULT_SCOPES`
-- `ATEL_MCP_AUDIT_LOG_PATH`
-- `ALLOW_CUSTOM_REMOTE_MCP`
-- `HOST`
-- `PORT`
+Release is not fully closed until:
+- owned domain is live
+- TLS is finalized on that host
+- OAuth metadata advertises the final domain
+- user docs point to the final example host
 
-Recommended production defaults:
-- `ATEL_PLATFORM_BASE_URL=https://api.atelai.org`
-- `ATEL_REGISTRY_BASE_URL=https://api.atelai.org`
-- `ATEL_RELAY_BASE_URL=https://api.atelai.org`
-- `ALLOW_CUSTOM_REMOTE_MCP=false`
-- `HOST=127.0.0.1`
-- `PORT=<private service port behind reverse proxy>`
+### B2. 47 production deployment path is not the active MCP path yet
 
-## Post-deploy validation
+Current Remote MCP public RC runs on 43.
 
-### Minimum health checks
-- process starts
-- MCP route responds on `POST /mcp`
-- authenticated `atel_whoami` works
-- `listTools` returns expected tool set
+If ATEL MCP is meant to move to 47, the remaining work is:
+- define systemd service ownership
+- define reverse proxy ownership
+- document rollback
+- re-run the public OAuth verification on 47
 
-### Release smoke order
-1. `atel_whoami`
-2. `atel_agent_register`
-3. `atel_agent_search`
-4. `atel_send_message`
-5. `atel_inbox_list`
-6. `atel_order_create`
-7. `atel_order_accept`
-8. `atel_milestone_submit/verify`
-9. `atel_order_timeline`
-10. `atel_audit_request_get`
+## Release decision
 
-## Release decision rule
+Current decision:
+- ATEL MCP is functionally complete for the current release slice
+- 43 is a valid public release-candidate host
+- production-upstream remote OAuth is verified
+- the remaining work is final domain cutover and, if desired, 47 deployment
 
-Do **not** deploy production MCP until:
-- production session contract is stable
-- deployment wiring is written down and reproducible
-- release smoke commands are executable by an operator without ad hoc fixes
+That means the service is no longer blocked on feature completeness.
+It is now in final release-hardening and cutover stage.

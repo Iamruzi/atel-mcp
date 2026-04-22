@@ -1,14 +1,31 @@
 # ATEL MCP Release Candidate on 43
 
 This document defines the 43-only release candidate workflow.
-It is intentionally separate from 47 production deployment.
+It stays intentionally separate from the 47 production deployment.
 
 ## Goal
 
-Use 43 as the release-debug host for ATEL MCP until:
-- production session contract is finalized
-- production deployment wiring is stable
-- release smoke is repeatable without manual fixes
+Use 43 as the public release-candidate host for ATEL MCP until:
+- the final public domain is cut over
+- the 47 deployment path is ready
+- operator verification stays repeatable without ad hoc fixes
+
+## Current verified state
+
+43 now supports two release-candidate modes:
+
+1. `local-test` upstream
+   - platform, registry, and relay point to local services on 43
+   - used for branch-by-branch smoke and failure-path debugging
+
+2. `production` upstream
+   - platform, registry, and relay point to `https://api.atelai.org`
+   - used for public remote OAuth verification against the real ATEL environment
+
+Verified on 2026-04-22:
+- `https://43-160-230-129.sslip.io/healthz` reports `environment=production`
+- public OAuth metadata and protected-resource metadata resolve correctly
+- `./scripts/release-verify.sh ./.env.release.production.local` passes full remote OAuth verification
 
 ## Runtime shape on 43
 
@@ -16,38 +33,27 @@ Use 43 as the release-debug host for ATEL MCP until:
 - port: `8787` by default
 - process: local Node service
 - audit: JSONL written under `.runtime/audit/`
-- upstream: configurable via env file
-- public remote route: optional path-prefixed reverse proxy such as `/atel-mcp`
+- public host: temporary `sslip.io` hostname until final domain cutover
 
-## Recommended env file
+## Recommended env files
 
-Start from:
+Committed examples:
 - `.env.release.example`
+  - local-test upstream example for branch smoke and failure debugging
+- `.env.release.production.example`
+  - production-upstream example for public RC validation
 
-Typical local/dev release-candidate copy:
+Local operator copies:
 - `.env.release.local`
+- `.env.release.production.local`
 
-Do not commit `.env.release.local`.
-
-For public-host testing on 43, set:
-
-```bash
-ATEL_MCP_PUBLIC_BASE_URL=http://43.160.230.129/atel-mcp
-ATEL_MCP_OAUTH_ISSUER_URL=http://43.160.230.129/atel-mcp
-ATEL_MCP_URL=http://127.0.0.1:8787/atel-mcp/mcp
-```
-
-This keeps:
-- MCP resource URL
-- OAuth issuer metadata
-- interactive authorization page
-
-under the same public path prefix.
+Do not commit the `*.local` files.
 
 ## Start / stop
 
 ```bash
 ./scripts/run-release-candidate.sh ./.env.release.local
+./scripts/run-release-candidate.sh ./.env.release.production.local
 ./scripts/stop-release-candidate.sh
 ```
 
@@ -55,46 +61,23 @@ under the same public path prefix.
 
 ```bash
 ./scripts/healthcheck.sh ./.env.release.local
+./scripts/healthcheck.sh ./.env.release.production.local
 ```
 
-This validates:
-- MCP HTTP server is reachable
-- `listTools` works
-- `atel_whoami` works when bearer token is present
-
-## Full release smoke on 43
+Quick manual checks:
 
 ```bash
-./scripts/release-smoke.sh ./.env.release.local
+curl -fsS http://127.0.0.1:8787/healthz
+curl -fsS https://43-160-230-129.sslip.io/healthz
+curl -fsS https://43-160-230-129.sslip.io/.well-known/oauth-authorization-server
+curl -fsS https://43-160-230-129.sslip.io/.well-known/oauth-protected-resource/mcp
 ```
 
-This runs:
-1. cleanup
-2. MCP HTTP smoke
-3. happy-path smoke
-4. dispute smoke
-5. auto-arbitration passed branch
-6. auto-arbitration failed branch
+## Verification flow
 
-The script performs cleanup and RC restart before each branch so stale dev state does not leak across runs.
+### Local-test upstream RC
 
-## Operator summary view
-
-For a concise release verdict without scanning the full JSON payloads:
-
-```bash
-./scripts/release-smoke-summary.sh ./.env.release.local
-```
-
-This returns one compact JSON object with:
-- one verdict row per branch
-- key IDs such as `orderId` and `disputeId`
-- final order state per branch
-- `artifactsDir` for the preserved full payloads of each branch
-
-## One-shot verify entrypoint
-
-For the normal operator path, use one command:
+Use the local-test env when validating branch behavior and release smoke:
 
 ```bash
 ./scripts/release-verify.sh ./.env.release.local
@@ -102,64 +85,57 @@ For the normal operator path, use one command:
 
 Default behavior:
 - runs the summary verifier
-- returns the compact JSON verdict when all branches pass
-- if verification fails, automatically collects a diagnostic bundle
+- returns compact JSON with one verdict per branch
+- automatically collects diagnostics on failure
 
 Optional:
-- `ATEL_MCP_VERIFY_MODE=full` runs the detailed `release-smoke.sh`
-- even in `full` mode, diagnostics are still collected on failure
+- `ATEL_MCP_VERIFY_MODE=full ./scripts/release-verify.sh ./.env.release.local`
+
+### Production-upstream RC
+
+Use the production-upstream env when validating the public RC against official ATEL services:
+
+```bash
+./scripts/release-verify.sh ./.env.release.production.local
+```
+
+When `ATEL_PLATFORM_BASE_URL=https://api.atelai.org`, `release-verify.sh` automatically switches to:
+- OAuth client registration
+- interactive authorization challenge
+- `https://api.atelai.org/auth/v1/verify`
+- token exchange
+- `initialize`
+- `tools/list`
+- authenticated `atel_whoami`
 
 ## Failure diagnostics
 
-When a release branch fails, collect the现场资料 immediately:
+When verification fails, collect diagnostics immediately:
 
 ```bash
 ./scripts/collect-release-diagnostics.sh
 ```
 
-Optional:
-- pass a specific release summary directory as the first argument
-- pass a target output directory as the second argument
-
-The diagnostic bundle includes:
-- RC full log and tail log
+The bundle includes:
+- RC log and tail log
 - audit full JSONL and tail JSONL
-- latest release summary payloads when available
+- release summary payloads when available
 - PID snapshot
 - `git rev-parse HEAD`
 - `git status --short`
 
-## Dispute branch expectations
-
-- `atel_dispute_create` returns `status=open`
-- `atel_dispute_get` returns the created `disputeId`
-- `atel_dispute_list` contains the created dispute
-- order audit contains `dispute.created`
-
 ## Release discipline
 
 Before every release-debug run on 43:
-1. use `smoke:cleanup`
-2. start the RC service via `scripts/run-release-candidate.sh`
-3. run health check
-4. run release smoke
-5. inspect audit log under `.runtime/audit/`
-
-## Arbitration branch expectations
-
-- `ATEL_MCP_ARBITRATION_EXPECTED=passed`
-  - third reject returns `arbitration_passed`
-  - final order remains `executing`
-  - `currentMilestone` advances to `1`
-  - order audit contains `milestone.arbitration_passed`
-
-- `ATEL_MCP_ARBITRATION_EXPECTED=failed`
-  - third reject returns `arbitration_failed`
-  - final order becomes `cancelled`
-  - timeline contains `order.cancelled`
-  - order audit contains `milestone.arbitration_failed`
+1. pick the correct env file for the target mode
+2. stop the RC process if it is already running
+3. start the RC service via `scripts/run-release-candidate.sh`
+4. run health check
+5. run `release-verify.sh`
+6. inspect `.runtime/audit/` when results do not match expectation
 
 ## Not included yet
 
-- 47 production deployment
-- production TLS/domain rollout
+- final domain and TLS cutover
+- 47 production deployment and rollback wiring
+- old temporary host cleanup after the final domain goes live
