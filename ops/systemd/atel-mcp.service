@@ -1,0 +1,14 @@
+[Unit]
+Description=ATEL MCP Remote Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/atel-mcp
+EnvironmentFile=-/etc/atel/atel-mcp.env
+ExecStart=/usr/bin/node dist/server/http.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
