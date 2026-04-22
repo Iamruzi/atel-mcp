@@ -74,6 +74,7 @@ export async function sendMessage(ctx: ToolExecutionContext, input: { peerDid: s
       message: {
         kind: 'text',
         text: input.text,
+        sourceLabel: 'ATEL MCP',
       },
     },
     bearerToken: ctx.session.bearerToken,
@@ -116,6 +117,7 @@ export async function createOrder(ctx: ToolExecutionContext, input: { executorDi
       priceCurrency: 'USD',
       pricingModel: 'per_task',
       description: input.description,
+      sourceLabel: 'ATEL MCP',
     },
     bearerToken: ctx.session.bearerToken,
   });

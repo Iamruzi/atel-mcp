@@ -80,8 +80,15 @@ https://43-160-230-129.sslip.io/mcp
 
 最清楚的说法是：
 
-- `ATEL SDK / OpenClaw native`：给 OpenClaw 用户的主路径
-- `ATEL MCP`：给外部 AI 宿主的互操作层
+- `ATEL Runtime / OpenClaw native`：原生和自托管执行路径
+- `ATEL MCP`：普通 Hosted 用户主入口，同时也是外部 AI 宿主互操作层
+
+当前很多 OpenClaw 用户仍然直接走原生 runtime 路径。
+长期方向是：
+
+- 普通用户优先从 MCP 进入
+- Runtime 继续服务 OpenClaw 原生和自托管执行
+- 两条路径共享同一个平台状态机
 
 这个边界一定要讲清楚，不然用户很容易搞混到底哪层才是主路径。
 

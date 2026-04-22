@@ -9,6 +9,62 @@ export const WhoamiOutputSchema = z.object({
   scopes: z.array(z.string())
 });
 
+const RuntimeBackendSchema = z.enum(['platform-hosted', 'sdk-runtime', 'linked-runtime']);
+const UserModeSchema = z.enum(['mcp-only', 'runtime-only', 'mcp-plus-runtime']);
+const ExecutionClassSchema = z.enum(['platform-truth-read', 'platform-state-write', 'runtime-capable']);
+
+export const RuntimeLinkRecordSchema = z.object({
+  hostedDid: DidSchema,
+  runtimeDid: DidSchema,
+  backend: z.enum(['sdk-runtime', 'linked-runtime']),
+  status: z.enum(['linked', 'degraded', 'offline']).optional(),
+  endpoint: z.string().url().optional(),
+  relayBaseUrl: z.string().url().optional(),
+  lastSeenAt: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional()
+});
+
+export const RuntimeLinkStatusOutputSchema = z.object({
+  did: DidSchema,
+  linked: z.boolean(),
+  runtimeLink: RuntimeLinkRecordSchema.nullable(),
+  executionPlan: z.object({
+    requestedBackend: RuntimeBackendSchema.optional(),
+    declaredUserMode: UserModeSchema.optional(),
+    selectedBackend: RuntimeBackendSchema,
+    executionClass: ExecutionClassSchema,
+    runtimeEligible: z.boolean(),
+    futureBackends: z.array(RuntimeBackendSchema),
+    runtimeLinkStatus: z.enum(['none', 'linked']),
+    runtimeLink: RuntimeLinkRecordSchema.optional(),
+    reason: z.string()
+  }),
+  architecture: z.object({
+    userEntryMode: z.literal('mcp-primary'),
+    runtimeRole: z.literal('sdk-runtime'),
+    runtimeBackends: z.array(z.string()),
+    supportedUserModes: z.array(z.string()),
+    sourceOfTruth: z.literal('platform')
+  })
+});
+
+export const RuntimeLinkBindInputSchema = z.object({
+  runtimeDid: DidSchema,
+  backend: z.enum(['sdk-runtime', 'linked-runtime']),
+  endpoint: z.string().url().optional(),
+  relayBaseUrl: z.string().url().optional(),
+  authToken: z.string().min(1).optional(),
+  status: z.enum(['linked', 'degraded', 'offline']).optional().default('linked')
+});
+
+export const RuntimeLinkMutationOutputSchema = z.object({
+  did: DidSchema,
+  action: z.enum(['bind', 'unbind']),
+  changed: z.boolean(),
+  linked: z.boolean(),
+  runtimeLink: RuntimeLinkRecordSchema.nullable()
+});
+
 export const AgentRegisterInputSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(2000).optional(),
@@ -54,7 +110,6 @@ export const DisputeCreateInputSchema = z.object({
   orderId: OrderIdSchema,
   reason: z.string().min(1).max(4000)
 });
-
 
 export const AuditOrderQueryInputSchema = z.object({
   orderId: OrderIdSchema,

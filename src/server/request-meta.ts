@@ -7,6 +7,8 @@ export interface ExtractedRequestMeta {
   idempotencyKey?: string;
   hostName?: string;
   userAgent?: string;
+  preferredRuntimeBackend?: string;
+  declaredUserMode?: string;
 }
 
 export function extractRequestMeta(req: Request): ExtractedRequestMeta {
@@ -15,5 +17,7 @@ export function extractRequestMeta(req: Request): ExtractedRequestMeta {
   const userAgent = req.header('user-agent') || undefined;
   const hostName = req.hostname || req.header('host') || undefined;
   const authorization = req.header('authorization') || null;
-  return { authorization, requestId, idempotencyKey, hostName, userAgent };
+  const preferredRuntimeBackend = req.header('x-atel-runtime-backend') || undefined;
+  const declaredUserMode = req.header('x-atel-user-mode') || undefined;
+  return { authorization, requestId, idempotencyKey, hostName, userAgent, preferredRuntimeBackend, declaredUserMode };
 }

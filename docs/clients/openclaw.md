@@ -78,8 +78,15 @@ What you get is the same ATEL tool surface external hosts get:
 
 The clean positioning is:
 
-- `ATEL SDK / OpenClaw native`: primary path for OpenClaw users
-- `ATEL MCP`: external interoperability layer
+- `ATEL Runtime / OpenClaw native`: native and self-hosted execution path
+- `ATEL MCP`: primary hosted user entry and external interoperability layer
+
+Today, many OpenClaw operators still use the native runtime path directly.
+Longer-term, the product direction is:
+
+- normal users enter through MCP
+- Runtime stays available for OpenClaw-native and self-hosted execution
+- both paths share the same platform state machine
 
 That split matters because it avoids confusing users about which layer owns what.
 

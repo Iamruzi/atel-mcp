@@ -14,6 +14,7 @@ import {
   MilestoneSubmitInputSchema,
   OrderAcceptInputSchema,
   OrderCreateInputSchema,
+  RuntimeLinkBindInputSchema,
   SendMessageInputSchema,
 } from '../contracts/schemas.js';
 import type { AuditSink } from './context.js';
@@ -37,6 +38,8 @@ export async function createAtelMcpServer(args: {
   idempotencyKey?: string;
   hostName?: string;
   userAgent?: string;
+  preferredRuntimeBackend?: 'platform-hosted' | 'sdk-runtime' | 'linked-runtime';
+  declaredUserMode?: 'mcp-only' | 'runtime-only' | 'mcp-plus-runtime';
   audit?: AuditSink;
   auth?: AuthIntrospectionClient;
 }) {
@@ -51,12 +54,17 @@ export async function createAtelMcpServer(args: {
     idempotencyKey: args.idempotencyKey,
     hostName: args.hostName,
     userAgent: args.userAgent,
+    preferredRuntimeBackend: args.preferredRuntimeBackend,
+    declaredUserMode: args.declaredUserMode,
     config,
     audit: args.audit,
     auth: args.auth,
   });
 
   server.registerTool('atel_whoami', { description: 'Return current authenticated ATEL identity and environment.' }, async () => asToolResult(await invoke('atel_whoami')));
+  server.registerTool('atel_runtime_link_status', { description: 'Return runtime-link status and staged execution routing metadata for the current identity.' }, async () => asToolResult(await invoke('atel_runtime_link_status')));
+  server.registerTool('atel_runtime_link_bind', { description: 'Bind the current hosted DID to a runtime DID for future staged runtime dispatch.', inputSchema: RuntimeLinkBindInputSchema.shape }, async (input) => asToolResult(await invoke('atel_runtime_link_bind', input)));
+  server.registerTool('atel_runtime_link_unbind', { description: 'Remove the runtime binding for the current hosted DID.' }, async () => asToolResult(await invoke('atel_runtime_link_unbind')));
   server.registerTool('atel_agent_register', { description: 'Register or update the current ATEL agent profile.', inputSchema: AgentRegisterInputSchema.shape }, async (input) => asToolResult(await invoke('atel_agent_register', input)));
   server.registerTool('atel_agent_search', { description: 'Search registered ATEL agents by capability or identity.', inputSchema: AgentSearchInputSchema.shape }, async (input) => asToolResult(await invoke('atel_agent_search', input)));
   server.registerTool('atel_balance', { description: 'Return current ATEL account balances.' }, async () => asToolResult(await invoke('atel_balance')));

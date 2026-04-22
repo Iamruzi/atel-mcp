@@ -8,6 +8,9 @@ import * as audit from './audit.js';
 
 export const TOOL_HANDLERS = {
   atel_whoami: identity.atelWhoami,
+  atel_runtime_link_status: identity.atelRuntimeLinkStatus,
+  atel_runtime_link_bind: identity.atelRuntimeLinkBind,
+  atel_runtime_link_unbind: identity.atelRuntimeLinkUnbind,
   atel_agent_register: identity.atelAgentRegister,
   atel_agent_search: identity.atelAgentSearch,
   atel_balance: wallet.atelBalance,

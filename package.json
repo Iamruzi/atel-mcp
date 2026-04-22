@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/server/http.js",
-    "test": "node --test dist/tests/**/*.test.js",
+    "test": "node --test dist/tests/*.test.js",
     "smoke:cleanup": "node dist/dev/smoke-cleanup.js",
     "smoke:happy": "node dist/dev/smoke-happy-path.js",
     "smoke:http": "node dist/dev/smoke-http.js",
@@ -20,7 +20,16 @@
     "smoke:auto-arbitration": "node dist/dev/smoke-auto-arbitration.js",
     "smoke:env-mismatch": "node dist/dev/smoke-environment-mismatch.js",
     "smoke:plugin-order": "node scripts/smoke-openclaw-plugin-order.mjs",
-    "smoke:plugin-dispute": "node scripts/smoke-openclaw-plugin-dispute.mjs"
+    "smoke:plugin-dispute": "node scripts/smoke-openclaw-plugin-dispute.mjs",
+    "runtime-links:list": "node dist/dev/runtime-links.js list",
+    "runtime-links:upsert": "node dist/dev/runtime-links.js upsert",
+    "runtime-links:remove": "node dist/dev/runtime-links.js remove",
+    "smoke:linked-runtime-message": "node ./dist/dev/smoke-linked-runtime-message.js",
+    "smoke:linked-runtime-order-create": "node ./dist/dev/smoke-linked-runtime-order-create.js",
+    "smoke:linked-runtime-order-accept": "node ./dist/dev/smoke-linked-runtime-order-accept.js",
+    "smoke:linked-runtime-milestone-submit": "node ./dist/dev/smoke-linked-runtime-milestone-submit.js",
+    "smoke:linked-runtime-milestone-verify": "node ./dist/dev/smoke-linked-runtime-milestone-verify.js",
+    "smoke:linked-runtime-milestone-reject": "node ./dist/dev/smoke-linked-runtime-milestone-reject.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -33,4 +42,3 @@
     "typescript": "^5.9.2"
   }
 }
-

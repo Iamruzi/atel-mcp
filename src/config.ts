@@ -1,6 +1,8 @@
 import type { AtelScope } from './contracts/scopes.js';
 
 export type AtelEnvironmentProfile = 'production' | 'local-test' | 'custom';
+export type AtelUserEntryMode = 'mcp-primary';
+export type AtelRuntimeRole = 'sdk-runtime';
 
 export interface AtelMcpConfig {
   port: number;
@@ -19,6 +21,11 @@ export interface AtelMcpConfig {
   allowCustomRemoteMcp: boolean;
   disableRegisterRateLimit?: boolean;
   auditLogPath?: string;
+  userEntryMode: AtelUserEntryMode;
+  runtimeRole: AtelRuntimeRole;
+  runtimeBackends: string[];
+  supportedUserModes: string[];
+  runtimeLinksPath: string;
 }
 
 function parseScopes(raw?: string): AtelScope[] {
@@ -42,6 +49,11 @@ function normalizeRouteBasePath(pathname: string): string {
   if (!pathname || pathname === '/') return '';
   const trimmed = pathname.replace(/\/+$/, '');
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function parseCsvList(raw: string | undefined, fallback: string[]): string[] {
+  const items = raw?.split(',').map((item) => item.trim()).filter(Boolean) ?? [];
+  return items.length > 0 ? items : fallback;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig {
@@ -84,6 +96,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     allowCustomRemoteMcp: env.ALLOW_CUSTOM_REMOTE_MCP === 'true',
     disableRegisterRateLimit: env.ATEL_MCP_DISABLE_REGISTER_RATE_LIMIT === 'true',
     auditLogPath: env.ATEL_MCP_AUDIT_LOG_PATH?.trim() || undefined,
+    userEntryMode: 'mcp-primary',
+    runtimeRole: 'sdk-runtime',
+    runtimeBackends: parseCsvList(env.ATEL_MCP_RUNTIME_BACKENDS, ['platform-hosted', 'sdk-runtime', 'linked-runtime']),
+    supportedUserModes: parseCsvList(env.ATEL_MCP_SUPPORTED_USER_MODES, ['mcp-only', 'runtime-only', 'mcp-plus-runtime']),
+    runtimeLinksPath: env.ATEL_MCP_RUNTIME_LINKS_PATH?.trim() || '.runtime/runtime-links.json',
   };
 }
 

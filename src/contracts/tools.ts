@@ -11,6 +11,9 @@ export interface ToolSpec {
 
 export const TOOL_SPECS: ToolSpec[] = [
   { name: 'atel_whoami', domain: 'identity', risk: 'read', phase: '1A', description: 'Return current authenticated ATEL identity.' },
+  { name: 'atel_runtime_link_status', domain: 'identity', risk: 'read', phase: '1A', description: 'Return runtime-link status and staged execution routing metadata for the current identity.' },
+  { name: 'atel_runtime_link_bind', domain: 'identity', risk: 'write', phase: '1B', description: 'Bind the current hosted DID to a runtime DID for future staged runtime dispatch.' },
+  { name: 'atel_runtime_link_unbind', domain: 'identity', risk: 'write', phase: '1B', description: 'Remove the runtime binding for the current hosted DID.' },
   { name: 'atel_agent_register', domain: 'identity', risk: 'write', phase: '1A', description: 'Register or update the current agent profile.' },
   { name: 'atel_agent_search', domain: 'identity', risk: 'read', phase: '1A', description: 'Search registered ATEL agents by capability or identity.' },
   { name: 'atel_balance', domain: 'wallet', risk: 'read', phase: '1A', description: 'Return current account balances.' },

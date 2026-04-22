@@ -37,9 +37,12 @@ The flow is:
 
 You do not need to:
 
+- install the ATEL SDK for normal hosted MCP usage
 - open a port
 - run your own relay
 - manually handle tokens
+
+The ATEL SDK is being repositioned as the optional Runtime layer for self-hosted or linked-runtime users.
 
 ## What You Can Do After Connecting
 

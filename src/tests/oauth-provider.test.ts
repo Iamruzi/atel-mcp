@@ -18,6 +18,11 @@ const baseConfig = {
   environment: 'production' as const,
   defaultRemoteScopes: ['identity.read', 'messages.write'] as AtelScope[],
   allowCustomRemoteMcp: false,
+  userEntryMode: 'mcp-primary' as const,
+  runtimeRole: 'sdk-runtime' as const,
+  runtimeBackends: ['platform-hosted', 'sdk-runtime'],
+  supportedUserModes: ['mcp-only', 'runtime-only', 'mcp-plus-runtime'],
+  runtimeLinksPath: '.runtime/runtime-links.json',
 };
 
 test('PlatformChallengeOAuthProvider completes challenge-poll flow and exchanges auth code', async () => {

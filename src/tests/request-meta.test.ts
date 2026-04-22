@@ -11,6 +11,8 @@ test('extractRequestMeta normalizes request headers', () => {
         'idempotency-key': 'idem-1',
         'user-agent': 'test-agent',
         host: 'mcp.example.com',
+        'x-atel-runtime-backend': 'sdk-runtime',
+        'x-atel-user-mode': 'mcp-plus-runtime',
       };
       return map[name];
     },
@@ -22,4 +24,6 @@ test('extractRequestMeta normalizes request headers', () => {
   assert.equal(meta.idempotencyKey, 'idem-1');
   assert.equal(meta.hostName, 'mcp.example.com');
   assert.equal(meta.userAgent, 'test-agent');
+  assert.equal(meta.preferredRuntimeBackend, 'sdk-runtime');
+  assert.equal(meta.declaredUserMode, 'mcp-plus-runtime');
 });

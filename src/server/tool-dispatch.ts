@@ -5,6 +5,8 @@ import { AtelMcpError } from '../contracts/errors.js';
 import { TOOL_SCOPE_REQUIREMENTS } from '../contracts/scopes.js';
 import { assertRemoteEnvironmentAllowed, assertScopes } from '../auth/guards.js';
 import { getToolHandler, hasTool, type ToolName } from './tool-registry.js';
+import { buildExecutionRoutePlan } from './execution-routing.js';
+import { getRuntimeLink } from '../runtime-links/store.js';
 import type { AtelMcpConfig } from '../config.js';
 
 export interface DispatchToolInput {
@@ -15,6 +17,8 @@ export interface DispatchToolInput {
   idempotencyKey?: string;
   hostName?: string;
   userAgent?: string;
+  preferredRuntimeBackend?: 'platform-hosted' | 'sdk-runtime' | 'linked-runtime';
+  declaredUserMode?: 'mcp-only' | 'runtime-only' | 'mcp-plus-runtime';
   config: AtelMcpConfig;
   audit?: AuditSink;
   auth?: AuthIntrospectionClient;
@@ -32,8 +36,20 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
     idempotencyKey: args.idempotencyKey,
     hostName: args.hostName,
     userAgent: args.userAgent,
+    preferredRuntimeBackend: args.preferredRuntimeBackend,
+    declaredUserMode: args.declaredUserMode,
     config: args.config,
     deps: { audit: args.audit, auth: args.auth },
+  });
+
+  const runtimeLink = await getRuntimeLink(args.config, ctx.session.did);
+
+  ctx.executionPlan = buildExecutionRoutePlan({
+    toolName: args.toolName,
+    config: args.config,
+    preferredBackend: args.preferredRuntimeBackend,
+    userMode: args.declaredUserMode,
+    runtimeLink,
   });
 
   await ctx.emitAudit({
@@ -45,6 +61,7 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
     metadata: {
       scopes: ctx.session.scopes,
       clientId: ctx.session.clientId,
+      executionPlan: ctx.executionPlan,
     },
   });
 
@@ -54,6 +71,7 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
     status: 'ok',
     entityType: 'request',
     entityId: ctx.meta.requestId,
+    metadata: { executionPlan: ctx.executionPlan },
   });
 
   try {

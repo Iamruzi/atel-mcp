@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AtelMcpConfig } from '../config.js';
 import type { AuditEvent } from '../contracts/audit.js';
+import type { AtelRuntimeBackend, AtelUserMode, ExecutionRoutePlan } from '../contracts/runtime.js';
 import { PlatformClient } from '../platform/client.js';
 import { createAuthIntrospectionClient, type AuthIntrospectionClient } from '../auth/introspection.js';
 import { resolveSession } from '../auth/session.js';
@@ -12,6 +13,8 @@ export interface McpRequestMeta {
   idempotencyKey?: string;
   hostName?: string;
   userAgent?: string;
+  preferredRuntimeBackend?: AtelRuntimeBackend;
+  declaredUserMode?: AtelUserMode;
 }
 
 export interface AuditSink {
@@ -27,6 +30,7 @@ export interface McpRequestContext {
   session: AtelSession;
   config: AtelMcpConfig;
   platform: PlatformClient;
+  executionPlan: ExecutionRoutePlan;
   emitAudit(event: AuditEvent): Promise<void>;
 }
 
@@ -48,6 +52,8 @@ export async function buildRequestContext(args: {
   idempotencyKey?: string;
   hostName?: string;
   userAgent?: string;
+  preferredRuntimeBackend?: AtelRuntimeBackend;
+  declaredUserMode?: AtelUserMode;
   deps?: {
     auth?: AuthIntrospectionClient;
     audit?: AuditSink;
@@ -60,6 +66,8 @@ export async function buildRequestContext(args: {
     idempotencyKey: args.idempotencyKey,
     hostName: args.hostName,
     userAgent: args.userAgent,
+    preferredRuntimeBackend: args.preferredRuntimeBackend,
+    declaredUserMode: args.declaredUserMode,
   };
 
   const auth = args.deps?.auth ?? createAuthIntrospectionClient(args.config);
@@ -73,6 +81,15 @@ export async function buildRequestContext(args: {
     session,
     config: args.config,
     platform: new PlatformClient(args.config),
+    executionPlan: {
+      declaredUserMode: args.declaredUserMode,
+      selectedBackend: 'platform-hosted',
+      executionClass: 'platform-truth-read',
+      runtimeEligible: false,
+      futureBackends: [],
+      runtimeLinkStatus: 'none',
+      reason: 'execution plan not resolved yet',
+    },
     emitAudit: async (event: AuditEvent) => {
       try {
         await ((args.deps?.audit) ?? new NoopAuditSink()).emit(event);

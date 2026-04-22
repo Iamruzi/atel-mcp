@@ -10,6 +10,7 @@ import {
   MilestoneSubmitInputSchema,
   OrderAcceptInputSchema,
   OrderCreateInputSchema,
+  RuntimeLinkBindInputSchema,
   SendMessageInputSchema,
   WhoamiOutputSchema,
 } from '../contracts/schemas.js';
@@ -17,6 +18,9 @@ import {
 export const MVP_MANIFEST = {
   identity: [
     { name: 'atel_whoami', input: null, output: WhoamiOutputSchema },
+    { name: 'atel_runtime_link_status', input: null },
+    { name: 'atel_runtime_link_bind', input: RuntimeLinkBindInputSchema },
+    { name: 'atel_runtime_link_unbind', input: null },
     { name: 'atel_agent_register', input: AgentRegisterInputSchema },
     { name: 'atel_agent_search', input: AgentSearchInputSchema },
   ],

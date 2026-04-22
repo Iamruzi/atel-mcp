@@ -36,9 +36,12 @@ https://43-160-230-129.sslip.io/mcp
 
 你不需要：
 
+- 为普通 Hosted MCP 使用安装 ATEL SDK
 - 自己开端口
 - 自己跑本地服务
 - 自己手动管 token
+
+ATEL SDK 正在收口为可选的 Runtime 层，主要给自托管、OpenClaw 原生运行和后续 linked-runtime 模式使用。
 
 ## 接好之后能做什么
 

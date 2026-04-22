@@ -7,6 +7,8 @@ import { extractRequestMeta } from './request-meta.js';
 import { createAuditSink } from '../audit/file-sink.js';
 import { MVP_MANIFEST } from './manifest.js';
 import { createOAuthBridge } from './oauth.js';
+import { AtelMcpError } from '../contracts/errors.js';
+import { parseDeclaredUserMode, parsePreferredRuntimeBackend } from './execution-routing.js';
 
 const MCP_VERSION = '0.1.0';
 
@@ -24,8 +26,7 @@ function buildAllowedHosts(config: ReturnType<typeof loadConfig>) {
   return [...allowedHosts].filter(Boolean);
 }
 
-function buildServiceMetadata() {
-  const config = loadConfig();
+export function buildServiceMetadata(config = loadConfig()) {
   return {
     name: 'atel-mcp',
     version: MCP_VERSION,
@@ -41,6 +42,13 @@ function buildServiceMetadata() {
     registryBaseUrl: config.registryBaseUrl,
     relayBaseUrl: config.relayBaseUrl,
     defaultRemoteScopes: config.defaultRemoteScopes,
+    architecture: {
+      userEntryMode: config.userEntryMode,
+      runtimeRole: config.runtimeRole,
+      runtimeBackends: config.runtimeBackends,
+      supportedUserModes: config.supportedUserModes,
+      sourceOfTruth: 'platform',
+    },
     toolGroups: Object.fromEntries(
       Object.entries(MVP_MANIFEST).map(([group, tools]) => [group, tools.map((tool) => tool.name)])
     ),
@@ -90,7 +98,12 @@ export function createHttpTransportApp() {
 
   app.post(route('/mcp'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
     const meta = extractRequestMeta(req);
-    const server = await createAtelMcpServer({ ...meta, audit });
+    const server = await createAtelMcpServer({
+      ...meta,
+      preferredRuntimeBackend: parsePreferredRuntimeBackend(meta.preferredRuntimeBackend),
+      declaredUserMode: parseDeclaredUserMode(meta.declaredUserMode),
+      audit,
+    });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     try {
       await server.connect(transport);
@@ -100,9 +113,36 @@ export function createHttpTransportApp() {
         server.close();
       });
     } catch (error) {
-      console.error('[atel-mcp] request failed', error);
+      console.error('[atel-mcp] request failed', {
+        requestId: meta.requestId,
+        error: error instanceof Error ? error.message : String(error),
+        code: error instanceof AtelMcpError ? error.code : undefined,
+        details: error instanceof AtelMcpError ? error.details : undefined,
+      });
       if (!res.headersSent) {
-        res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
+        if (error instanceof AtelMcpError) {
+          const status = error.code === 'UNAUTHORIZED' ? 401
+            : error.code === 'FORBIDDEN' ? 403
+            : error.code === 'INVALID_INPUT' ? 400
+            : error.code === 'NOT_FOUND' ? 404
+            : error.code === 'UPSTREAM_ERROR' ? 502
+            : 500;
+          res.status(status).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: error.message,
+              data: {
+                atelCode: error.code,
+                details: error.details ?? null,
+                requestId: meta.requestId,
+              },
+            },
+            id: null,
+          });
+        } else {
+          res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
+        }
       }
     }
   });

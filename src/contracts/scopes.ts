@@ -22,9 +22,11 @@ export const DEFAULT_REMOTE_SCOPES: AtelScope[] = [
   'disputes.read'
 ];
 
-
 export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: AtelScope[] }> = {
   atel_whoami: { all: ['identity.read'] },
+  atel_runtime_link_status: { all: ['identity.read'] },
+  atel_runtime_link_bind: { all: ['identity.read'] },
+  atel_runtime_link_unbind: { all: ['identity.read'] },
   atel_agent_register: { all: ['identity.read'] },
   atel_agent_search: { all: ['identity.read'] },
   atel_balance: { all: ['wallet.read'] },
