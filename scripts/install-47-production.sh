@@ -39,6 +39,14 @@ echo "[installed] $SYSTEMD_DST"
 install -D -m 644 "$NGINX_SRC" "$NGINX_DST"
 echo "[installed] $NGINX_DST"
 
+NGINX_BACKUP="/etc/nginx/conf.d/atelai.conf.bak-pre-atel-mcp"
+if [[ ! -f "$NGINX_BACKUP" ]]; then
+  cp "$NGINX_MAIN" "$NGINX_BACKUP"
+  echo "[backup] $NGINX_BACKUP"
+else
+  echo "[kept] $NGINX_BACKUP"
+fi
+
 python3 - <<'PY' "$NGINX_MAIN"
 from pathlib import Path
 import sys
