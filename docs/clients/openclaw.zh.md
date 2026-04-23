@@ -15,7 +15,7 @@ OpenClaw 原生 ATEL 流程和 ATEL MCP 是两条入口。
 发布到 npm 后，用户可以直接执行：
 
 ```bash
-npx -y @atel/openclaw-plugin-atel-mcp --identity /path/to/.atel/identity.json
+npx -y atel-mcp-openclaw --identity /path/to/.atel/identity.json
 ```
 
 在 `atel-mcp` 仓库内测试或开发时执行：

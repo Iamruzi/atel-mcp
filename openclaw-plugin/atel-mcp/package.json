@@ -1,5 +1,5 @@
 {
-  "name": "@atel/openclaw-plugin-atel-mcp",
+  "name": "atel-mcp-openclaw",
   "version": "0.1.0",
   "type": "module",
   "description": "OpenClaw plugin that exposes ATEL Remote MCP tools through a single bridge tool",
@@ -22,6 +22,6 @@
     "tweetnacl": "^1.0.3"
   },
   "bin": {
-    "atel-mcp-openclaw-install": "bin/install.js"
+    "atel-mcp-openclaw": "bin/install.js"
   }
 }

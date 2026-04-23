@@ -15,7 +15,7 @@ OpenClaw must install and configure the `atel-mcp` plugin first.
 After npm publish, users can run:
 
 ```bash
-npx -y @atel/openclaw-plugin-atel-mcp --identity /path/to/.atel/identity.json
+npx -y atel-mcp-openclaw --identity /path/to/.atel/identity.json
 ```
 
 From the `atel-mcp` repository during development:

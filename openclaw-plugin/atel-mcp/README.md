@@ -8,7 +8,7 @@ the ATEL Remote MCP server.
 After publishing to npm:
 
 ```bash
-npx -y @atel/openclaw-plugin-atel-mcp --identity /path/to/.atel/identity.json
+npx -y atel-mcp-openclaw --identity /path/to/.atel/identity.json
 ```
 
 From this repository:
