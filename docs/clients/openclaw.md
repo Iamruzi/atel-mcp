@@ -27,8 +27,8 @@ ATEL_IDENTITY_PATH=/path/to/.atel/identity.json ./scripts/install-openclaw-plugi
 Default production endpoints:
 
 ```text
-serverBaseUrl=https://atelai.org
-platformBaseUrl=https://api.atelai.org
+serverBaseUrl=https://atelai.xyz
+platformBaseUrl=https://api.atelai.xyz
 ```
 
 ## Verify

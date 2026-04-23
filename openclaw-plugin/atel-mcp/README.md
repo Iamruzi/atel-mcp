@@ -19,8 +19,8 @@ ATEL_IDENTITY_PATH=/path/to/.atel/identity.json ./scripts/install-openclaw-plugi
 
 Defaults:
 
-- `serverBaseUrl=https://atelai.org`
-- `platformBaseUrl=https://api.atelai.org`
+- `serverBaseUrl=https://atelai.xyz`
+- `platformBaseUrl=https://api.atelai.xyz`
 
 The installer copies the plugin into `~/.openclaw/extensions/atel-mcp`, installs
 runtime dependencies, writes `plugins.entries.atel-mcp.config`, validates

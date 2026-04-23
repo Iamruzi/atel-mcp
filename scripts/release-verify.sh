@@ -26,7 +26,7 @@ run_production_verify() {
 }
 
 run_verify() {
-  if [[ "$ENV_PLATFORM_BASE_URL" == "https://api.atelai.org" ]]; then
+  if [[ "$ENV_PLATFORM_BASE_URL" == "https://api.atelai.xyz" ]]; then
     run_production_verify
     return 0
   fi

@@ -34,8 +34,8 @@ const identityPath = valueOf("--identity") || process.env.ATEL_IDENTITY_PATH || 
   path.join(openclawHome, "workspace", ".atel", "identity.json"),
   path.join(openclawHome, "workspace", "atel-sdk", ".atel", "identity.json"),
 ]);
-const serverBaseUrl = valueOf("--server") || process.env.ATEL_MCP_SERVER_BASE_URL || "https://atelai.org";
-const platformBaseUrl = valueOf("--platform") || process.env.ATEL_PLATFORM_BASE_URL || "https://api.atelai.org";
+const serverBaseUrl = valueOf("--server") || process.env.ATEL_MCP_SERVER_BASE_URL || "https://atelai.xyz";
+const platformBaseUrl = valueOf("--platform") || process.env.ATEL_PLATFORM_BASE_URL || "https://api.atelai.xyz";
 
 if (!fs.existsSync(configPath)) die(`OpenClaw config not found: ${configPath}`);
 if (!identityPath || !fs.existsSync(identityPath)) die("ATEL identity not found. Pass --identity /path/to/.atel/identity.json");
@@ -85,10 +85,10 @@ config.plugins.installs["atel-mcp"] = {
   source: "npm",
   spec: "atel-mcp-openclaw",
   installPath: extensionDir,
-  version: "0.1.1",
+  version: "0.1.2",
   resolvedName: "atel-mcp-openclaw",
-  resolvedVersion: "0.1.1",
-  resolvedSpec: "atel-mcp-openclaw@0.1.1",
+  resolvedVersion: "0.1.2",
+  resolvedSpec: "atel-mcp-openclaw@0.1.2",
   installedAt: new Date().toISOString()
 };
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");

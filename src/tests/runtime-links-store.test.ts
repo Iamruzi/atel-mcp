@@ -8,7 +8,7 @@ import { getRuntimeLink, getRuntimeLinkSecret, listRuntimeLinks, removeRuntimeLi
 
 function configFor(path: string) {
   return loadConfig({
-    ATEL_PLATFORM_BASE_URL: 'https://api.atelai.org',
+    ATEL_PLATFORM_BASE_URL: 'https://api.atelai.xyz',
     ATEL_MCP_RUNTIME_LINKS_PATH: path,
   } as never);
 }

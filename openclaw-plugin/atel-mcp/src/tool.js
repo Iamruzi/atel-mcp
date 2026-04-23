@@ -16,8 +16,8 @@ const DEFAULT_SCOPES = [
 ];
 
 const DEFAULT_CONFIG = {
-  serverBaseUrl: "https://atelai.org",
-  platformBaseUrl: "https://api.atelai.org",
+  serverBaseUrl: "https://atelai.xyz",
+  platformBaseUrl: "https://api.atelai.xyz",
   identityPath: "/root/.openclaw/workspace/atel-sdk/.atel/identity.json",
   sdkDistPath: "/root/.openclaw/workspace/atel-sdk/dist/index.js",
   naclPath: "/root/.openclaw/workspace/atel-sdk/node_modules/tweetnacl/nacl-fast.js",

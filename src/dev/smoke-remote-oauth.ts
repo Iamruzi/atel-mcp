@@ -33,7 +33,7 @@ async function main() {
     process.env.ATEL_MCP_REMOTE_BASE_URL ??
     process.env.ATEL_MCP_PUBLIC_BASE_URL ??
     'https://43-160-230-129.sslip.io';
-  const platformBase = process.env.ATEL_PLATFORM_BASE_URL ?? 'https://api.atelai.org';
+  const platformBase = process.env.ATEL_PLATFORM_BASE_URL ?? 'https://api.atelai.xyz';
   const identityPath = requiredPath(
     process.env.ATEL_IDENTITY_PATH ?? '/root/.atel/identity.json',
     'ATEL identity',

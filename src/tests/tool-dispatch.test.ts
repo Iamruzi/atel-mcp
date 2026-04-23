@@ -25,7 +25,7 @@ test('dispatchTool runs atel_whoami with injected auth', async () => {
   const result = await dispatchTool({
     toolName: 'atel_whoami',
     authorization: 'Bearer test-token',
-    config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.org' } as never),
+    config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.xyz' } as never),
     auth,
   });
   assert.deepEqual(result, {
@@ -39,7 +39,7 @@ test('dispatchTool accepts staged runtime routing hints without changing executi
   const result = await dispatchTool({
     toolName: 'atel_whoami',
     authorization: 'Bearer test-token',
-    config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.org' } as never),
+    config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.xyz' } as never),
     auth,
     preferredRuntimeBackend: 'sdk-runtime',
     declaredUserMode: 'mcp-plus-runtime',
@@ -55,7 +55,7 @@ test('dispatchTool exposes runtime-link status for the current identity', async 
   const result = await dispatchTool({
     toolName: 'atel_runtime_link_status',
     authorization: 'Bearer test-token',
-    config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.org' } as never),
+    config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.xyz' } as never),
     auth,
   }) as {
     did: string;
@@ -86,7 +86,7 @@ test('dispatchTool exposes runtime-link status for the current identity', async 
 test('dispatchTool binds and unbinds runtime-link for the current identity', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'atel-runtime-link-dispatch-'));
   const config = loadConfig({
-    ATEL_PLATFORM_BASE_URL: 'https://api.atelai.org',
+    ATEL_PLATFORM_BASE_URL: 'https://api.atelai.xyz',
     ATEL_MCP_RUNTIME_LINKS_PATH: join(dir, 'runtime-links.json'),
   } as never);
 

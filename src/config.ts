@@ -57,7 +57,7 @@ function parseCsvList(raw: string | undefined, fallback: string[]): string[] {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig {
-  const platformBaseUrl = env.ATEL_PLATFORM_BASE_URL ?? 'https://api.atelai.org';
+  const platformBaseUrl = env.ATEL_PLATFORM_BASE_URL ?? 'https://api.atelai.xyz';
   const registryBaseUrl = env.ATEL_REGISTRY_BASE_URL ?? platformBaseUrl;
   const relayBaseUrl = env.ATEL_RELAY_BASE_URL ?? platformBaseUrl;
   const port = Number(env.PORT ?? '8787');
@@ -76,7 +76,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
   const routeBasePath = publicPath || issuerPath;
 
   let environment: AtelEnvironmentProfile = 'custom';
-  if (platformBaseUrl === 'https://api.atelai.org') environment = 'production';
+  if (platformBaseUrl === 'https://api.atelai.xyz') environment = 'production';
   if (platformBaseUrl.includes('127.0.0.1') || platformBaseUrl.includes('localhost')) environment = 'local-test';
 
   return {

@@ -27,8 +27,8 @@ ATEL_IDENTITY_PATH=/path/to/.atel/identity.json ./scripts/install-openclaw-plugi
 默认生产入口：
 
 ```text
-serverBaseUrl=https://atelai.org
-platformBaseUrl=https://api.atelai.org
+serverBaseUrl=https://atelai.xyz
+platformBaseUrl=https://api.atelai.xyz
 ```
 
 ## 配置样例
@@ -40,8 +40,8 @@ platformBaseUrl=https://api.atelai.org
       "atel-mcp": {
         "enabled": true,
         "config": {
-          "serverBaseUrl": "https://atelai.org",
-          "platformBaseUrl": "https://api.atelai.org",
+          "serverBaseUrl": "https://atelai.xyz",
+          "platformBaseUrl": "https://api.atelai.xyz",
           "identityPath": "/path/to/.atel/identity.json",
           "sdkDistPath": "/path/to/atel-sdk/dist/index.js",
           "naclPath": "/path/to/atel-sdk/node_modules/tweetnacl/nacl-fast.js"

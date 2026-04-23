@@ -8,8 +8,8 @@ CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$OPENCLAW_HOME/openclaw.json}"
 EXTENSIONS_DIR="${OPENCLAW_EXTENSIONS_DIR:-$OPENCLAW_HOME/extensions}"
 EXT_DIR="$EXTENSIONS_DIR/atel-mcp"
 
-SERVER_BASE_URL="${ATEL_MCP_SERVER_BASE_URL:-https://atelai.org}"
-PLATFORM_BASE_URL="${ATEL_PLATFORM_BASE_URL:-https://api.atelai.org}"
+SERVER_BASE_URL="${ATEL_MCP_SERVER_BASE_URL:-https://atelai.xyz}"
+PLATFORM_BASE_URL="${ATEL_PLATFORM_BASE_URL:-https://api.atelai.xyz}"
 IDENTITY_PATH="${ATEL_IDENTITY_PATH:-}"
 SDK_DIST_PATH="${ATEL_SDK_DIST_PATH:-}"
 NACL_PATH="${ATEL_NACL_PATH:-}"
@@ -93,9 +93,9 @@ config.plugins.installs["atel-mcp"] = {
   source: "path",
   spec: pluginDir,
   installPath: extDir,
-  version: "0.1.1",
+  version: "0.1.2",
   resolvedName: "atel-mcp-openclaw",
-  resolvedVersion: "0.1.1",
+  resolvedVersion: "0.1.2",
   resolvedSpec: pluginDir,
   installedAt: new Date().toISOString()
 };

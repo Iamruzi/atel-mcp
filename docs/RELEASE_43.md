@@ -19,7 +19,7 @@ Use 43 as the public release-candidate host for ATEL MCP until:
    - used for branch-by-branch smoke and failure-path debugging
 
 2. `production` upstream
-   - platform, registry, and relay point to `https://api.atelai.org`
+   - platform, registry, and relay point to `https://api.atelai.xyz`
    - used for public remote OAuth verification against the real ATEL environment
 
 Verified on 2026-04-22:
@@ -99,10 +99,10 @@ Use the production-upstream env when validating the public RC against official A
 ./scripts/release-verify.sh ./.env.release.production.local
 ```
 
-When `ATEL_PLATFORM_BASE_URL=https://api.atelai.org`, `release-verify.sh` automatically switches to:
+When `ATEL_PLATFORM_BASE_URL=https://api.atelai.xyz`, `release-verify.sh` automatically switches to:
 - OAuth client registration
 - interactive authorization challenge
-- `https://api.atelai.org/auth/v1/verify`
+- `https://api.atelai.xyz/auth/v1/verify`
 - token exchange
 - `initialize`
 - `tools/list`

@@ -98,9 +98,9 @@ On the server, update the env file so the MCP server publishes the final public 
 Example final values:
 
 ```bash
-ATEL_PLATFORM_BASE_URL=https://api.atelai.org
-ATEL_REGISTRY_BASE_URL=https://api.atelai.org
-ATEL_RELAY_BASE_URL=https://api.atelai.org
+ATEL_PLATFORM_BASE_URL=https://api.atelai.xyz
+ATEL_REGISTRY_BASE_URL=https://api.atelai.xyz
+ATEL_RELAY_BASE_URL=https://api.atelai.xyz
 ATEL_MCP_PUBLIC_BASE_URL=https://mcp.atelai.org
 ATEL_MCP_OAUTH_ISSUER_URL=https://mcp.atelai.org
 ATEL_MCP_URL=http://127.0.0.1:8787/mcp
