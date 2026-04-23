@@ -507,7 +507,7 @@ function normalizeMilestoneArgs(input) {
     orderId: String(input?.orderId || "").trim(),
     index: Number(input?.index),
     content: typeof input?.content === "string" ? input.content : "",
-    approved: Boolean(input?.approved),
+    approved: input?.approved !== false,
     feedback: typeof input?.feedback === "string" ? input.feedback : "",
   };
 }
