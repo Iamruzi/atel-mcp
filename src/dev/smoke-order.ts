@@ -45,6 +45,26 @@ async function main() {
   const executor = await createClient(executorToken, serverUrl);
 
   try {
+    await requester.callTool({
+      name: 'atel_agent_register',
+      arguments: {
+        name: process.env.ATEL_MCP_REQUESTER_NAME ?? 'MCP Order Smoke Requester',
+        description: 'Remote MCP order smoke requester identity',
+        capabilities: ['research', 'analysis'],
+        discoverable: true,
+      },
+    });
+
+    await executor.callTool({
+      name: 'atel_agent_register',
+      arguments: {
+        name: process.env.ATEL_MCP_EXECUTOR_NAME ?? 'MCP Order Smoke Executor',
+        description: 'Remote MCP order smoke executor identity',
+        capabilities: [capabilityType, 'analysis'],
+        discoverable: true,
+      },
+    });
+
     const createResult = await requester.callTool({
       name: 'atel_order_create',
       arguments: {
