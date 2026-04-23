@@ -93,9 +93,9 @@ config.plugins.installs["atel-mcp"] = {
   source: "path",
   spec: pluginDir,
   installPath: extDir,
-  version: "0.1.0",
-  resolvedName: "@atel/openclaw-plugin-atel-mcp",
-  resolvedVersion: "0.1.0",
+  version: "0.1.1",
+  resolvedName: "atel-mcp-openclaw",
+  resolvedVersion: "0.1.1",
   resolvedSpec: pluginDir,
   installedAt: new Date().toISOString()
 };

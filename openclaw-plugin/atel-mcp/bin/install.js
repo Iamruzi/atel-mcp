@@ -83,12 +83,12 @@ config.plugins.entries["atel-mcp"] = {
 };
 config.plugins.installs["atel-mcp"] = {
   source: "npm",
-  spec: "@atel/openclaw-plugin-atel-mcp",
+  spec: "atel-mcp-openclaw",
   installPath: extensionDir,
-  version: "0.1.0",
-  resolvedName: "@atel/openclaw-plugin-atel-mcp",
-  resolvedVersion: "0.1.0",
-  resolvedSpec: "@atel/openclaw-plugin-atel-mcp@0.1.0",
+  version: "0.1.1",
+  resolvedName: "atel-mcp-openclaw",
+  resolvedVersion: "0.1.1",
+  resolvedSpec: "atel-mcp-openclaw@0.1.1",
   installedAt: new Date().toISOString()
 };
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
