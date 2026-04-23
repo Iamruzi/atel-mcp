@@ -132,6 +132,34 @@ export async function acceptOrder(ctx: ToolExecutionContext, orderId: string) {
   });
 }
 
+export async function completeOrder(ctx: ToolExecutionContext, input: {
+  orderId: string;
+  taskId?: string;
+  proofBundle: unknown;
+  anchorTx?: string;
+  traceRoot: string;
+  chain?: 'base' | 'bsc';
+  traceEvents?: unknown;
+  audit?: unknown;
+}) {
+  const { orderId, ...body } = input;
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.trade.remoteComplete(orderId),
+    body,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function confirmOrder(ctx: ToolExecutionContext, orderId: string) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.trade.remoteConfirm(orderId),
+    body: {},
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
 export async function listMilestones(ctx: ToolExecutionContext, orderId: string) {
   return ctx.platform.request<unknown>({
     method: 'GET',

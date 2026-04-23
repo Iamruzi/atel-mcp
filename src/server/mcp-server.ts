@@ -13,6 +13,8 @@ import {
   MilestoneActionInputSchema,
   MilestoneSubmitInputSchema,
   OrderAcceptInputSchema,
+  OrderCompleteInputSchema,
+  OrderConfirmInputSchema,
   OrderCreateInputSchema,
   RuntimeLinkBindInputSchema,
   SendMessageInputSchema,
@@ -78,6 +80,8 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_order_timeline', { description: 'Get the order activity timeline.', inputSchema: orderIdInput() }, async (input) => asToolResult(await invoke('atel_order_timeline', input)));
   server.registerTool('atel_order_create', { description: 'Create an ATEL order.', inputSchema: OrderCreateInputSchema.shape }, async (input) => asToolResult(await invoke('atel_order_create', input)));
   server.registerTool('atel_order_accept', { description: 'Accept an ATEL order.', inputSchema: OrderAcceptInputSchema.shape }, async (input) => asToolResult(await invoke('atel_order_accept', input)));
+  server.registerTool('atel_order_complete', { description: 'Complete an ATEL order with proof and trace metadata.', inputSchema: OrderCompleteInputSchema.shape }, async (input) => asToolResult(await invoke('atel_order_complete', input)));
+  server.registerTool('atel_order_confirm', { description: 'Confirm and settle a completed ATEL order.', inputSchema: OrderConfirmInputSchema.shape }, async (input) => asToolResult(await invoke('atel_order_confirm', input)));
   server.registerTool('atel_milestone_list', { description: 'List milestones for an order.', inputSchema: orderIdInput() }, async (input) => asToolResult(await invoke('atel_milestone_list', input)));
   server.registerTool('atel_milestone_submit', { description: 'Submit milestone content.', inputSchema: MilestoneSubmitInputSchema.shape }, async (input) => asToolResult(await invoke('atel_milestone_submit', input)));
   server.registerTool('atel_milestone_verify', { description: 'Approve milestone content.', inputSchema: MilestoneActionInputSchema.shape }, async (input) => asToolResult(await invoke('atel_milestone_verify', input)));

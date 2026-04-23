@@ -1,5 +1,5 @@
-import { OrderAcceptInputSchema, OrderCreateInputSchema, OrderIdSchema } from '../contracts/schemas.js';
-import { acceptOrder, createOrder, getOrder, getOrderTimeline, listMilestones, listOrders } from '../platform/adapters.js';
+import { OrderAcceptInputSchema, OrderCompleteInputSchema, OrderConfirmInputSchema, OrderCreateInputSchema, OrderIdSchema } from '../contracts/schemas.js';
+import { acceptOrder, completeOrder, confirmOrder, createOrder, getOrder, getOrderTimeline, listMilestones, listOrders } from '../platform/adapters.js';
 import { getRuntimeLinkSecret } from '../runtime-links/store.js';
 import { invokeLinkedRuntimeTool } from '../runtime-links/dispatch.js';
 import type { ToolExecutionContext } from '../server/context.js';
@@ -107,6 +107,45 @@ export async function atelOrderAccept(ctx: ToolExecutionContext, input: unknown)
     metadata: {
       backend,
       routeTarget,
+    },
+  });
+  return result;
+}
+
+export async function atelOrderComplete(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'orders.write');
+  const parsed = OrderCompleteInputSchema.parse(input);
+  const result = await completeOrder(ctx, parsed);
+
+  await ctx.emitAudit({
+    ...childAuditBase(ctx),
+    type: 'order.completed',
+    status: 'ok',
+    entityType: 'order',
+    entityId: parsed.orderId,
+    orderId: parsed.orderId,
+    metadata: {
+      backend: 'platform-hosted',
+      chain: parsed.chain,
+    },
+  });
+  return result;
+}
+
+export async function atelOrderConfirm(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'orders.write');
+  const orderId = OrderConfirmInputSchema.parse(input).orderId;
+  const result = await confirmOrder(ctx, orderId);
+
+  await ctx.emitAudit({
+    ...childAuditBase(ctx),
+    type: 'order.confirmed',
+    status: 'ok',
+    entityType: 'order',
+    entityId: orderId,
+    orderId,
+    metadata: {
+      backend: 'platform-hosted',
     },
   });
   return result;

@@ -24,6 +24,8 @@ export const TOOL_HANDLERS = {
   atel_order_timeline: order.atelOrderTimeline,
   atel_order_create: order.atelOrderCreate,
   atel_order_accept: order.atelOrderAccept,
+  atel_order_complete: order.atelOrderComplete,
+  atel_order_confirm: order.atelOrderConfirm,
   atel_milestone_list: order.atelMilestoneList,
   atel_milestone_submit: milestone.atelMilestoneSubmit,
   atel_milestone_verify: milestone.atelMilestoneVerify,

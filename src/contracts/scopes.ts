@@ -40,6 +40,8 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_order_timeline: { all: ['orders.read'] },
   atel_order_create: { all: ['orders.write'] },
   atel_order_accept: { all: ['orders.write'] },
+  atel_order_complete: { all: ['orders.write'] },
+  atel_order_confirm: { all: ['orders.write'] },
   atel_milestone_list: { all: ['milestones.read'] },
   atel_milestone_submit: { all: ['milestones.write'] },
   atel_milestone_verify: { all: ['milestones.write'] },

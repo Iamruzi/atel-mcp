@@ -54,6 +54,8 @@ It is an **A2A MVP** covering:
 ### Tools
 - `atel_order_create`
 - `atel_order_accept`
+- `atel_order_complete`
+- `atel_order_confirm`
 - `atel_milestone_submit`
 - `atel_milestone_verify`
 - `atel_milestone_reject`
@@ -69,8 +71,6 @@ It is an **A2A MVP** covering:
 
 ## Explicitly deferred to Phase 2+
 - `atel_order_escrow` as a public MCP tool
-- `atel_order_complete`
-- `atel_order_confirm`
 - `atel_order_rate`
 - `atel_dispute_resolve`
 - wallet transfer/withdraw

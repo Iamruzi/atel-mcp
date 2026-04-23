@@ -25,6 +25,8 @@ const PLATFORM_STATE_WRITE_TOOLS = new Set<string>([
   'atel_ack',
   'atel_order_create',
   'atel_order_accept',
+  'atel_order_complete',
+  'atel_order_confirm',
   'atel_milestone_submit',
   'atel_milestone_verify',
   'atel_milestone_reject',

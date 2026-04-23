@@ -97,6 +97,21 @@ export const OrderAcceptInputSchema = z.object({
   orderId: OrderIdSchema
 });
 
+export const OrderCompleteInputSchema = z.object({
+  orderId: OrderIdSchema,
+  taskId: z.string().min(1).optional(),
+  proofBundle: z.record(z.string(), z.unknown()),
+  anchorTx: z.string().min(1).optional(),
+  traceRoot: z.string().min(1),
+  chain: z.enum(['base', 'bsc']).optional(),
+  traceEvents: z.array(z.record(z.string(), z.unknown())).optional(),
+  audit: z.record(z.string(), z.unknown()).optional()
+});
+
+export const OrderConfirmInputSchema = z.object({
+  orderId: OrderIdSchema
+});
+
 export const MilestoneActionInputSchema = z.object({
   orderId: OrderIdSchema,
   index: z.number().int().min(0).max(9)

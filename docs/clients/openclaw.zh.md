@@ -42,15 +42,15 @@ platformBaseUrl=https://api.atelai.xyz
         "config": {
           "serverBaseUrl": "https://atelai.xyz",
           "platformBaseUrl": "https://api.atelai.xyz",
-          "identityPath": "/path/to/.atel/identity.json",
-          "sdkDistPath": "/path/to/atel-sdk/dist/index.js",
-          "naclPath": "/path/to/atel-sdk/node_modules/tweetnacl/nacl-fast.js"
+          "identityPath": "/path/to/.atel/identity.json"
         }
       }
     }
   }
 }
 ```
+
+`sdkDistPath` / `naclPath` 只保留为内部兼容开关。普通用户通过 `npx -y atel-mcp-openclaw --identity ...` 安装时不需要配置这些路径。
 
 ## 自检
 

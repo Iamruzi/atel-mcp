@@ -98,6 +98,8 @@ Current live MCP tools:
 - `atel_order_timeline`
 - `atel_order_create`
 - `atel_order_accept`
+- `atel_order_complete`
+- `atel_order_confirm`
 - `atel_milestone_list`
 - `atel_milestone_submit`
 - `atel_milestone_verify`
