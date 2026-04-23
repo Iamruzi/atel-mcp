@@ -1,97 +1,66 @@
-# ATEL MCP for OpenClaw Users
+# OpenClaw TG Bot + ATEL MCP
 
-This guide is intentionally different.
+OpenClaw native ATEL flow and ATEL MCP are two different entry points.
+If the test requires a Telegram OpenClaw bot to explicitly call MCP tools,
+OpenClaw must install and configure the `atel-mcp` plugin first.
 
-If you are already an OpenClaw user, ATEL MCP is usually not your main path.
+## Required Setup
 
-## The Short Version
+1. `openclaw plugins inspect atel-mcp --json` shows `status=loaded`.
+2. `~/.openclaw/openclaw.json` contains `plugins.entries.atel-mcp.config`.
+3. `identityPath` points to the ATEL DID identity that should own the MCP actions.
 
-For OpenClaw users:
+## Install
 
-- use native ATEL / OpenClaw integration first
-- use MCP only when you need to expose ATEL into another generic host
+After npm publish, users can run:
 
-In other words:
-
-- OpenClaw is your native runtime
-- `atel-mcp` is your bridge for external hosts
-
-## When OpenClaw Users Should Use Native Flow
-
-Use native OpenClaw or ATEL flow when you want:
-
-- normal P2P messaging
-- normal order flow
-- native notifications
-- direct platform integration
-- less protocol indirection
-
-This is the preferred path for production operator usage.
-
-## When OpenClaw Users Should Use MCP
-
-Use `atel-mcp` only when:
-
-- you want an external host such as Claude Code or Codex to operate on ATEL
-- you need a standard MCP tool interface
-- you are integrating with a third-party client that already speaks MCP
-
-## Why MCP Is Not The Main Path For OpenClaw
-
-Because OpenClaw already understands your ATEL domain better than a generic MCP host.
-
-If an OpenClaw user goes through MCP by default, they add:
-
-- extra OAuth steps
-- extra host-side tool planning
-- extra mapping between model intent and ATEL business actions
-
-That is sometimes useful, but it is not the simplest production route.
-
-## If You Still Want To Use MCP From An OpenClaw Context
-
-The Remote MCP URL follows this format:
-
-```text
-${ATEL_MCP_BASE_URL}/mcp
+```bash
+npx -y @atel/openclaw-plugin-atel-mcp --identity /path/to/.atel/identity.json
 ```
 
-Current example:
+From the `atel-mcp` repository during development:
 
-```text
-https://43-160-230-129.sslip.io/mcp
+```bash
+ATEL_IDENTITY_PATH=/path/to/.atel/identity.json ./scripts/install-openclaw-plugin.sh
 ```
 
-What you get is the same ATEL tool surface external hosts get:
+Default production endpoints:
 
-- identity
-- wallet
-- contacts
-- inbox
-- messaging
-- orders
-- milestones
-- disputes
-- audit
+```text
+serverBaseUrl=https://atelai.org
+platformBaseUrl=https://api.atelai.org
+```
 
-## What This Means In Product Terms
+## Verify
 
-The clean positioning is:
+```bash
+openclaw config validate
+openclaw plugins inspect atel-mcp --json
+```
 
-- `ATEL Runtime / OpenClaw native`: native and self-hosted execution path
-- `ATEL MCP`: primary hosted user entry and external interoperability layer
+Expected:
 
-Today, many OpenClaw operators still use the native runtime path directly.
-Longer-term, the product direction is:
+```text
+status=loaded
+toolNames=["atel_mcp"]
+```
 
-- normal users enter through MCP
-- Runtime stays available for OpenClaw-native and self-hosted execution
-- both paths share the same platform state machine
+Then ask the Telegram bot:
 
-That split matters because it avoids confusing users about which layer owns what.
+```text
+Use ATEL MCP to call atel_whoami and tell me the current DID, environment, and scopes.
+```
 
-## Recommended User Message
+Expected:
 
-If you explain this to users, say it simply:
+```text
+environment=production
+DID matches the configured identityPath
+```
 
-"If you already use OpenClaw, keep using the native ATEL flow. MCP is for plugging ATEL into Claude Code, Codex, and other generic AI hosts."
+## Boundaries
+
+- Without this plugin, OpenClaw cannot call ATEL MCP tools from Telegram.
+- A raw `atel` CLI is not MCP integration evidence.
+- `identityPath` must match the requester/executor runtime identity used in the test.
+- MCP-triggered order and message callbacks must include the `ATEL MCP` label.

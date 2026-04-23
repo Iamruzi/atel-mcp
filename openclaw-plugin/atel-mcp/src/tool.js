@@ -16,7 +16,7 @@ const DEFAULT_SCOPES = [
 ];
 
 const DEFAULT_CONFIG = {
-  serverBaseUrl: "https://43-160-230-129.sslip.io",
+  serverBaseUrl: "https://atelai.org",
   platformBaseUrl: "https://api.atelai.org",
   identityPath: "/root/.openclaw/workspace/atel-sdk/.atel/identity.json",
   sdkDistPath: "/root/.openclaw/workspace/atel-sdk/dist/index.js",
@@ -155,6 +155,38 @@ function requireReadableFile(filePath, label) {
   return filePath;
 }
 
+function serializePayloadLocal(obj) {
+  return JSON.stringify(obj, (_key, value) => {
+    if (value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Uint8Array)) {
+      const sorted = {};
+      for (const k of Object.keys(value).sort()) {
+        sorted[k] = value[k];
+      }
+      return sorted;
+    }
+    return value;
+  });
+}
+
+async function resolveSerializePayload(config) {
+  if (config.sdkDistPath && fs.existsSync(config.sdkDistPath)) {
+    const sdkModule = await import(pathToFileURL(path.resolve(config.sdkDistPath)).href);
+    if (typeof sdkModule.serializePayload === "function") {
+      return sdkModule.serializePayload;
+    }
+  }
+  return serializePayloadLocal;
+}
+
+async function resolveNacl(config) {
+  if (config.naclPath && fs.existsSync(config.naclPath)) {
+    const naclModule = await import(pathToFileURL(path.resolve(config.naclPath)).href);
+    return naclModule.default ?? naclModule;
+  }
+  const naclModule = await import("tweetnacl");
+  return naclModule.default ?? naclModule;
+}
+
 function resolveIdentityPath(configuredPath) {
   const candidates = [
     configuredPath,
@@ -222,18 +254,11 @@ async function getAccessToken(runtime) {
 
   const config = readPluginConfig(runtime);
   const identityPath = resolveIdentityPath(config.identityPath);
-  const sdkDistPath = requireReadableFile(config.sdkDistPath, "ATEL SDK dist");
-  const naclPath = requireReadableFile(config.naclPath, "tweetnacl");
   const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
   const secretKey = decodeSecretKey(identity.secretKey);
 
-  const sdkModule = await import(pathToFileURL(path.resolve(sdkDistPath)).href);
-  const naclModule = await import(pathToFileURL(path.resolve(naclPath)).href);
-  const serializePayload = sdkModule.serializePayload;
-  const nacl = naclModule.default ?? naclModule;
-  if (typeof serializePayload !== "function") {
-    throw new Error(`serializePayload missing from ${sdkDistPath}`);
-  }
+  const serializePayload = await resolveSerializePayload(config);
+  const nacl = await resolveNacl(config);
 
   const persisted = getPersistedOauthCache(config, identity, config.scopes);
   const redirectUri = "https://atel.local/callback";
@@ -398,18 +423,11 @@ async function getAccessToken(runtime) {
 async function loadSigningContext(runtime) {
   const config = readPluginConfig(runtime);
   const identityPath = resolveIdentityPath(config.identityPath);
-  const sdkDistPath = requireReadableFile(config.sdkDistPath, "ATEL SDK dist");
-  const naclPath = requireReadableFile(config.naclPath, "tweetnacl");
   const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
   const secretKey = decodeSecretKey(identity.secretKey);
 
-  const sdkModule = await import(pathToFileURL(path.resolve(sdkDistPath)).href);
-  const naclModule = await import(pathToFileURL(path.resolve(naclPath)).href);
-  const serializePayload = sdkModule.serializePayload;
-  const nacl = naclModule.default ?? naclModule;
-  if (typeof serializePayload !== "function") {
-    throw new Error(`serializePayload missing from ${sdkDistPath}`);
-  }
+  const serializePayload = await resolveSerializePayload(config);
+  const nacl = await resolveNacl(config);
 
   return {
     config,
@@ -439,8 +457,7 @@ function buildSignedEnvelope(signing, payload) {
   };
 }
 
-async function signedPlatformRequest(runtime, method, pathName, payload) {
-  const signing = await loadSigningContext(runtime);
+async function signedPlatformRequestWithContext(signing, method, pathName, payload) {
   const response = await fetch(`${signing.config.platformBaseUrl}${pathName}`, {
     method,
     headers: {
@@ -454,6 +471,25 @@ async function signedPlatformRequest(runtime, method, pathName, payload) {
     throw new Error(`Platform ${method} ${pathName} failed: ${response.status} ${JSON.stringify(body)}`);
   }
   return body;
+}
+
+async function signedPlatformRequest(runtime, method, pathName, payload) {
+  const signing = await loadSigningContext(runtime);
+  return signedPlatformRequestWithContext(signing, method, pathName, payload);
+}
+
+function signTaskRequest(signing, taskRequest) {
+  const signable = JSON.stringify({
+    capability: taskRequest.capability,
+    description: taskRequest.description,
+    executorDid: taskRequest.executorDid,
+    payload: taskRequest.payload,
+    requesterDid: taskRequest.requesterDid,
+    taskId: taskRequest.taskId,
+    timestamp: taskRequest.timestamp,
+    version: taskRequest.version,
+  });
+  return Buffer.from(signing.nacl.sign.detached(Buffer.from(signable), signing.secretKey)).toString("base64");
 }
 
 function normalizeOrderCreateArgs(input) {
@@ -485,6 +521,18 @@ async function callLocalSignedTool(runtime, toolName, rawArgs) {
       if (!input.executorDid || !input.capabilityType || !input.description || !Number.isFinite(input.priceUsdc) || input.priceUsdc < 0) {
         throw new Error("atel_order_create requires executorDid, capabilityType, description, and priceUsdc >= 0");
       }
+      const signing = await loadSigningContext(runtime);
+      const taskRequest = {
+        version: 2,
+        orderId: null,
+        taskId: `task-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`,
+        requesterDid: signing.identity.did,
+        executorDid: input.executorDid,
+        capability: input.capabilityType,
+        description: input.description,
+        payload: { description: input.description },
+        timestamp: new Date().toISOString(),
+      };
       const payload = {
         executorDid: input.executorDid,
         capabilityType: input.capabilityType,
@@ -492,6 +540,10 @@ async function callLocalSignedTool(runtime, toolName, rawArgs) {
         priceCurrency: "USD",
         pricingModel: "per_task",
         description: input.description,
+        sourceLabel: "ATEL MCP",
+        version: 2,
+        taskRequest,
+        taskSignature: signTaskRequest(signing, taskRequest),
       };
       if (input.chain) {
         payload.chain = input.chain;
@@ -499,7 +551,7 @@ async function callLocalSignedTool(runtime, toolName, rawArgs) {
       return {
         tool: toolName,
         mode: "local-signed",
-        structuredContent: await signedPlatformRequest(runtime, "POST", "/trade/v1/order", payload),
+        structuredContent: await signedPlatformRequestWithContext(signing, "POST", "/trade/v1/order", payload),
         content: [],
         isError: false,
       };

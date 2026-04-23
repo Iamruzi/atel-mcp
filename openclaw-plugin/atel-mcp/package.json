@@ -12,5 +12,16 @@
   ],
   "peerDependencies": {
     "openclaw": ">=2026.2.24"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  },
+  "bin": {
+    "atel-mcp-openclaw-install": "bin/install.js"
   }
 }

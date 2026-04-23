@@ -5,7 +5,7 @@ const plugin = {
   name: "ATEL MCP",
   description: "Bridge OpenClaw to the remote ATEL MCP server",
   register(api) {
-    api.registerTool(createAtelMcpTool(api.runtime), { name: "atel_mcp" });
+    api.registerTool(createAtelMcpTool(api.runtime));
   },
 };
 
