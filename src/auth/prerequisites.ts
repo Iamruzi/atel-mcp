@@ -18,7 +18,7 @@
 
 import type { ToolExecutionContext } from '../server/context.js';
 import type { PrerequisiteCheckResult } from './types.js';
-import { getBalance, getAgent } from '../platform/adapters.js';
+import { getBalance, getAgent, getOrder, listMilestones } from '../platform/adapters.js';
 
 /**
  * Wallet on the given chain must be deployed and ready before any chain
@@ -139,6 +139,171 @@ export async function targetExists(
  * Without this: order goes to an offline / wrong-skill executor → expires → user
  * waits + frustration.
  */
+/**
+ * Order must be in one of the allowed statuses before a state-mutating action.
+ * Without this, host LLM can call atel_milestone_submit on a `cancelled` order
+ * (silent state-machine violation, audit log shows tool.invoked but server
+ * confused).
+ */
+export async function orderInStatus(
+  ctx: ToolExecutionContext,
+  orderId: string,
+  allowedStatuses: string[],
+): Promise<PrerequisiteCheckResult> {
+  try {
+    const order = (await getOrder(ctx, orderId)) as { status?: string } | null;
+    if (!order) {
+      return {
+        ok: false,
+        code: 'TARGET_NOT_FOUND',
+        message: `Order ${orderId} not found`,
+        hint: 'Verify the orderId via atel_order_list.',
+      };
+    }
+    if (!allowedStatuses.includes(order.status ?? '')) {
+      return {
+        ok: false,
+        code: 'PREREQUISITE_NOT_MET',
+        message: `Order is in status=${order.status}, requires one of [${allowedStatuses.join(',')}]`,
+        details: { orderId, current: order.status, allowed: allowedStatuses },
+        hint: `Use atel_order_timeline ${orderId} to see how it got to ${order.status}.`,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'PREREQUISITE_NOT_MET',
+      message: `Cannot check order status: ${(e as Error).message}`,
+    };
+  }
+}
+
+/**
+ * Caller must be the order's executor (for accept/submit) or requester (for
+ * verify/reject). Server-side enforcement so host LLM can't fake DID role.
+ */
+export async function callerIsRole(
+  ctx: ToolExecutionContext,
+  orderId: string,
+  role: 'requester' | 'executor',
+): Promise<PrerequisiteCheckResult> {
+  try {
+    const order = (await getOrder(ctx, orderId)) as
+      | { requesterDid?: string; executorDid?: string; requester_did?: string; executor_did?: string }
+      | null;
+    if (!order) {
+      return {
+        ok: false,
+        code: 'TARGET_NOT_FOUND',
+        message: `Order ${orderId} not found`,
+      };
+    }
+    const expected = role === 'requester' ? (order.requesterDid ?? order.requester_did) : (order.executorDid ?? order.executor_did);
+    if (expected !== ctx.session.did) {
+      return {
+        ok: false,
+        code: 'FORBIDDEN',
+        message: `This action is restricted to the order ${role}`,
+        details: { yourDid: ctx.session.did, expectedDid: expected, role },
+        hint: `Only the ${role} (${expected}) can do this. Switch identity or pick another order.`,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'PREREQUISITE_NOT_MET',
+      message: `Cannot verify role: ${(e as Error).message}`,
+    };
+  }
+}
+
+/**
+ * Milestone N can only be submitted after milestone N-1 is verified. Without
+ * this, host LLM tries to submit M2 before M1 verifies → undefined platform
+ * behavior (we observed cases where milestones get verified out of order).
+ */
+export async function previousMilestoneVerified(
+  ctx: ToolExecutionContext,
+  orderId: string,
+  index: number,
+): Promise<PrerequisiteCheckResult> {
+  if (index === 0) return { ok: true };
+  try {
+    const milestones = (await listMilestones(ctx, orderId)) as Array<{ index?: number; status?: string }> | { milestones?: Array<{ index?: number; status?: string }> };
+    const list = Array.isArray(milestones) ? milestones : (milestones.milestones ?? []);
+    const prev = list.find((m) => m.index === index - 1);
+    if (!prev) {
+      return {
+        ok: false,
+        code: 'PREREQUISITE_NOT_MET',
+        message: `Previous milestone ${index - 1} does not exist`,
+        hint: `Use atel_milestone_list ${orderId} to see what milestones are defined.`,
+      };
+    }
+    if (prev.status !== 'verified') {
+      return {
+        ok: false,
+        code: 'PREREQUISITE_NOT_MET',
+        message: `Milestone ${index - 1} is in status=${prev.status}, must be 'verified' before submitting milestone ${index}`,
+        details: { previousIndex: index - 1, previousStatus: prev.status },
+        hint: prev.status === 'submitted'
+          ? `Wait for requester to verify M${index - 1} (or atel_milestone_verify yourself if you are the requester).`
+          : `Submit + verify M${index - 1} first.`,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'PREREQUISITE_NOT_MET',
+      message: `Cannot check milestone history: ${(e as Error).message}`,
+    };
+  }
+}
+
+/**
+ * Milestone must be in 'submitted' status before verify/reject. Without this,
+ * host LLM verifies a milestone that hasn't been submitted yet (audit shows
+ * verified=true but executor never delivered).
+ */
+export async function milestoneIsSubmitted(
+  ctx: ToolExecutionContext,
+  orderId: string,
+  index: number,
+): Promise<PrerequisiteCheckResult> {
+  try {
+    const milestones = (await listMilestones(ctx, orderId)) as Array<{ index?: number; status?: string }> | { milestones?: Array<{ index?: number; status?: string }> };
+    const list = Array.isArray(milestones) ? milestones : (milestones.milestones ?? []);
+    const m = list.find((mm) => mm.index === index);
+    if (!m) {
+      return {
+        ok: false,
+        code: 'PREREQUISITE_NOT_MET',
+        message: `Milestone ${index} does not exist on order ${orderId}`,
+        hint: `Use atel_milestone_list ${orderId} to see valid indexes.`,
+      };
+    }
+    if (m.status !== 'submitted') {
+      return {
+        ok: false,
+        code: 'PREREQUISITE_NOT_MET',
+        message: `Milestone ${index} is in status=${m.status}, must be 'submitted' to verify/reject`,
+        details: { milestoneIndex: index, current: m.status },
+        hint: m.status === 'verified' ? 'This milestone is already verified.' : `Wait for executor to submit M${index} via atel_milestone_submit.`,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'PREREQUISITE_NOT_MET',
+      message: `Cannot check milestone status: ${(e as Error).message}`,
+    };
+  }
+}
+
 export async function executorReady(
   ctx: ToolExecutionContext,
   executorDid: string,

@@ -5,6 +5,8 @@ import { invokeLinkedRuntimeTool } from '../runtime-links/dispatch.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
+import { assertPrerequisite } from '../auth/guards.js';
+import { executorReady, sufficientBalance, walletReady, orderInStatus, callerIsRole } from '../auth/prerequisites.js';
 
 export async function atelOrderGet(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.read');
@@ -27,6 +29,14 @@ export async function atelOrderTimeline(ctx: ToolExecutionContext, input: unknow
 export async function atelOrderCreate(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.write');
   const parsed = OrderCreateInputSchema.parse(input);
+
+  // Reject before locking funds: executor exists & online & has the capability,
+  // requester wallet on base is deployed, requester has price + 5% gas buffer.
+  // Without these, order goes onchain → escrow lock → executor can never accept
+  // (offline / wrong skill) → order expires → user waits + frustration.
+  await assertPrerequisite(ctx.session, () => executorReady(ctx, parsed.executorDid, parsed.capabilityType));
+  await assertPrerequisite(ctx.session, () => walletReady(ctx, 'base'));
+  await assertPrerequisite(ctx.session, () => sufficientBalance(ctx, 'base', parsed.priceUsdc));
 
   let result: unknown;
   let backend = 'platform-hosted';
@@ -73,6 +83,12 @@ export async function atelOrderCreate(ctx: ToolExecutionContext, input: unknown)
 export async function atelOrderAccept(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.write');
   const orderId = OrderAcceptInputSchema.parse(input).orderId;
+
+  // Server-side state-machine enforcement: order must be pending + caller
+  // must be the assigned executor. Stops host LLM from "accepting" an order
+  // that's already executing or that someone else owns.
+  await assertPrerequisite(ctx.session, () => orderInStatus(ctx, orderId, ['pending', 'pending_acceptance']));
+  await assertPrerequisite(ctx.session, () => callerIsRole(ctx, orderId, 'executor'));
 
   let result: unknown;
   let backend = 'platform-hosted';

@@ -59,7 +59,8 @@ export type PrerequisiteCheckResult =
         | 'WALLET_NOT_READY'
         | 'TARGET_NOT_FOUND'
         | 'EXECUTOR_OFFLINE'
-        | 'CAPABILITY_MISMATCH';
+        | 'CAPABILITY_MISMATCH'
+        | 'FORBIDDEN';
       message: string;
       details?: Record<string, unknown>;
       hint?: string;
