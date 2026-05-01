@@ -140,3 +140,33 @@ export const AuditRequestQueryInputSchema = z.object({
   requestId: z.string().min(1),
   limit: z.number().int().min(1).max(500).optional().default(100)
 });
+
+// ─── A2B (Bitrefill gift card) schemas ────────────────────────────────
+//
+// Anti-drift design notes:
+// - `query` is free-form (Bitrefill product name).
+// - `country` is a free string here but server-side validates against
+//   Bitrefill's supported list. We do NOT enum it client-side because
+//   the list changes; instead errors carry actionable hint.
+// - `limit` is server-clamped (see a2b.ts tool wrapper) — host LLM can
+//   send any number, the tool enforces 30. The infamous漂移 case:
+//   SKILL.md says "use 30", LLM uses 5 default, misses Boxer at position 7.
+
+const A2bIntentIdSchema = z.string().min(1).startsWith('intent_');
+
+export const A2bSearchInputSchema = z.object({
+  query: z.string().min(1).max(200),
+  country: z.string().min(2).max(40).optional(),
+  // Note: server clamps to 30 regardless of what host passes; this field is
+  // kept optional so the schema doesn't reject calls that omit it.
+  limit: z.number().int().min(1).max(50).optional()
+});
+
+export const A2bPurchaseGetInputSchema = z.object({
+  intentId: A2bIntentIdSchema
+});
+
+export const A2bPurchaseListInputSchema = z.object({
+  limit: z.number().int().min(1).max(100).optional().default(20),
+  offset: z.number().int().min(0).optional().default(0)
+});

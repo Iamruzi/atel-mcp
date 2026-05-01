@@ -5,6 +5,7 @@ import * as order from './order.js';
 import * as milestone from './milestone.js';
 import * as dispute from './dispute.js';
 import * as audit from './audit.js';
+import * as a2b from './a2b.js';
 
 export const TOOL_HANDLERS = {
   atel_whoami: identity.atelWhoami,
@@ -36,6 +37,9 @@ export const TOOL_HANDLERS = {
   atel_audit_order_get: audit.atelAuditOrderGet,
   atel_audit_session_get: audit.atelAuditSessionGet,
   atel_audit_request_get: audit.atelAuditRequestGet,
+  atel_a2b_search: a2b.atelA2bSearch,
+  atel_a2b_purchase_list: a2b.atelA2bPurchaseList,
+  atel_a2b_purchase_get: a2b.atelA2bPurchaseGet,
 } as const;
 
 export type ToolName = keyof typeof TOOL_HANDLERS;

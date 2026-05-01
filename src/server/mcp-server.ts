@@ -18,6 +18,9 @@ import {
   OrderCreateInputSchema,
   RuntimeLinkBindInputSchema,
   SendMessageInputSchema,
+  A2bSearchInputSchema,
+  A2bPurchaseGetInputSchema,
+  A2bPurchaseListInputSchema,
 } from '../contracts/schemas.js';
 import type { AuditSink } from './context.js';
 import type { AuthIntrospectionClient } from '../auth/introspection.js';
@@ -92,6 +95,9 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_audit_order_get', { description: 'Read the audit trail for an order.', inputSchema: AuditOrderQueryInputSchema.shape }, async (input) => asToolResult(await invoke('atel_audit_order_get', input)));
   server.registerTool('atel_audit_session_get', { description: 'Read the audit trail for the current or specified session.', inputSchema: AuditSessionQueryInputSchema.shape }, async (input) => asToolResult(await invoke('atel_audit_session_get', input)));
   server.registerTool('atel_audit_request_get', { description: 'Read the audit trail for a specific request.', inputSchema: AuditRequestQueryInputSchema.shape }, async (input) => asToolResult(await invoke('atel_audit_request_get', input)));
+  server.registerTool('atel_a2b_search', { description: 'Search Bitrefill gift cards. Server enforces limit=30 (the SKILL.md drift case). Filter by country (e.g. ZA, US).', inputSchema: A2bSearchInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_search', input)));
+  server.registerTool('atel_a2b_purchase_list', { description: 'List your A2B gift card purchases (paginated).', inputSchema: A2bPurchaseListInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_purchase_list', input)));
+  server.registerTool('atel_a2b_purchase_get', { description: 'Get one A2B purchase. Redemption code is included only when status=DELIVERED.', inputSchema: A2bPurchaseGetInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_purchase_get', input)));
 
   return server;
 }

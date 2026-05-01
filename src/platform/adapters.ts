@@ -19,6 +19,98 @@ export async function registryRegister(ctx: ToolExecutionContext, input: { name:
   });
 }
 
+// ─── A2B (Bitrefill gift card) adapters ──────────────────────────────────
+//
+// All a2b endpoints return raw platform JSON; MCP tool layer is responsible
+// for shape normalization and prerequisite checks.
+
+export async function a2bSearch(
+  ctx: ToolExecutionContext,
+  input: { query: string; country?: string; limit: number },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.a2b.search,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function a2bList(ctx: ToolExecutionContext, input?: { limit?: number; offset?: number }) {
+  return ctx.platform.request<unknown>({
+    method: 'GET',
+    path: PLATFORM_ENDPOINTS.a2b.list,
+    query: { did: ctx.session.did, limit: input?.limit, offset: input?.offset },
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function a2bDetail(ctx: ToolExecutionContext, intentId: string) {
+  return ctx.platform.request<unknown>({
+    method: 'GET',
+    path: PLATFORM_ENDPOINTS.a2b.detail(intentId),
+    query: { did: ctx.session.did },
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function a2bRedemptionReveal(ctx: ToolExecutionContext, intentId: string) {
+  return ctx.platform.request<unknown>({
+    method: 'GET',
+    path: PLATFORM_ENDPOINTS.a2b.redemptionReveal(intentId),
+    query: { did: ctx.session.did },
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function a2bIntent(
+  ctx: ToolExecutionContext,
+  input: { productId: string; value: number; country?: string },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.a2b.intent,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function a2bDeposit(
+  ctx: ToolExecutionContext,
+  input: { intentId: string; amount: number; userSA: string },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.a2b.deposit,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function a2bCreateInvoice(
+  ctx: ToolExecutionContext,
+  input: { intentId: string },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.a2b.createInvoice,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+export async function a2bPay(
+  ctx: ToolExecutionContext,
+  input: { intentId: string; amount: number },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.a2b.pay,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
 /**
  * Lookup a single agent by DID. Returns null if 404, used by prerequisite
  * checks (targetExists / executorReady) to verify a DID is real before

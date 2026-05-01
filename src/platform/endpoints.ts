@@ -44,5 +44,16 @@ export const PLATFORM_ENDPOINTS = {
     create: '/dispute/v1/open',
     remoteCreate: '/dispute/v1/remote/open',
     detail: (disputeId: string) => `/dispute/v1/${encodeURIComponent(disputeId)}`
+  },
+  a2b: {
+    search: '/trade/v1/a2b/bitrefill/search',
+    intent: '/trade/v1/a2b/intent',
+    deposit: '/trade/v1/a2b/wallet/deposit',
+    createInvoice: '/trade/v1/a2b/bitrefill/createInvoice',
+    pay: '/trade/v1/a2b/wallet/pay',
+    redemption: '/trade/v1/a2b/bitrefill/redemption',
+    list: '/trade/v1/a2b/list',
+    detail: (intentId: string) => `/trade/v1/a2b/detail/${encodeURIComponent(intentId)}`,
+    redemptionReveal: (intentId: string) => `/trade/v1/a2b/redemption-reveal/${encodeURIComponent(intentId)}`
   }
 } as const;
