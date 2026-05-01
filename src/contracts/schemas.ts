@@ -170,3 +170,33 @@ export const A2bPurchaseListInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional().default(20),
   offset: z.number().int().min(0).optional().default(0)
 });
+
+// Anti-drift notes for write path:
+// - amount fields are ALWAYS in USDC decimal (e.g. 0.01 = 1 cent, not raw 10000).
+//   Production drift: SDK accepted both raw and decimal, LLM mixed them up.
+// - chain is NOT accepted from host. Server hard-codes 'base' because Bitrefill
+//   doesn't accept Fast/BSC USDC. See `测试/.../A2B-Fast链路开发计划` memo.
+// - productId must come from a real atel_a2b_search result. Server will defer
+//   the scope check to platform a2b policy table; MCP just shapes the input.
+
+export const A2bIntentCreateInputSchema = z.object({
+  productId: z.string().min(1).max(200),
+  // value is local-currency face value (e.g. 1.0 USD for a $1 Boxer card),
+  // not the USDC amount paid. Server / Bitrefill computes the USDC amount.
+  value: z.number().positive().max(10000),
+  country: z.string().min(2).max(40).optional()
+});
+
+export const A2bLockFundsInputSchema = z.object({
+  intentId: A2bIntentIdSchema,
+  // amount is USDC decimal (NOT raw). Server enforces it equals the
+  // intent's max_amount within tolerance — host can't lock more / less.
+  amount: z.number().positive().max(10000)
+});
+
+export const A2bExecutePurchaseInputSchema = z.object({
+  intentId: A2bIntentIdSchema,
+  // amount is USDC decimal of payment to Bitrefill. Server validates against
+  // already-deposited amount.
+  amount: z.number().positive().max(10000)
+});

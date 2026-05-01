@@ -40,6 +40,9 @@ export const TOOL_HANDLERS = {
   atel_a2b_search: a2b.atelA2bSearch,
   atel_a2b_purchase_list: a2b.atelA2bPurchaseList,
   atel_a2b_purchase_get: a2b.atelA2bPurchaseGet,
+  atel_a2b_intent_create: a2b.atelA2bIntentCreate,
+  atel_a2b_lock_funds: a2b.atelA2bLockFunds,
+  atel_a2b_execute_purchase: a2b.atelA2bExecutePurchase,
 } as const;
 
 export type ToolName = keyof typeof TOOL_HANDLERS;

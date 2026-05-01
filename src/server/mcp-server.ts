@@ -21,6 +21,9 @@ import {
   A2bSearchInputSchema,
   A2bPurchaseGetInputSchema,
   A2bPurchaseListInputSchema,
+  A2bIntentCreateInputSchema,
+  A2bLockFundsInputSchema,
+  A2bExecutePurchaseInputSchema,
 } from '../contracts/schemas.js';
 import type { AuditSink } from './context.js';
 import type { AuthIntrospectionClient } from '../auth/introspection.js';
@@ -98,6 +101,9 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_a2b_search', { description: 'Search Bitrefill gift cards. Server enforces limit=30 (the SKILL.md drift case). Filter by country (e.g. ZA, US).', inputSchema: A2bSearchInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_search', input)));
   server.registerTool('atel_a2b_purchase_list', { description: 'List your A2B gift card purchases (paginated).', inputSchema: A2bPurchaseListInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_purchase_list', input)));
   server.registerTool('atel_a2b_purchase_get', { description: 'Get one A2B purchase. Redemption code is included only when status=DELIVERED.', inputSchema: A2bPurchaseGetInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_purchase_get', input)));
+  server.registerTool('atel_a2b_intent_create', { description: 'Create a Bitrefill purchase intent. value is local-currency face value (e.g. 1.0 USD), NOT USDC amount. No funds moved.', inputSchema: A2bIntentCreateInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_intent_create', input)));
+  server.registerTool('atel_a2b_lock_funds', { description: 'Lock USDC for an intent on chain=base (server hard-locked, Bitrefill rejects Fast/BSC). amount is USDC decimal. Server enforces walletReady + sufficientBalance.', inputSchema: A2bLockFundsInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_lock_funds', input)));
+  server.registerTool('atel_a2b_execute_purchase', { description: 'Execute the Bitrefill purchase (createInvoice + pay). Run only after atel_a2b_lock_funds succeeded. Poll atel_a2b_purchase_get for redemption code once status=DELIVERED.', inputSchema: A2bExecutePurchaseInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_execute_purchase', input)));
 
   return server;
 }
