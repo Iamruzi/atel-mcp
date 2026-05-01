@@ -5,6 +5,8 @@ import { invokeLinkedRuntimeTool } from '../runtime-links/dispatch.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
+import { assertPrerequisite } from '../auth/guards.js';
+import { targetExists } from '../auth/prerequisites.js';
 
 export async function atelContactsList(ctx: ToolExecutionContext) {
   requireScope(ctx, 'contacts.read');
@@ -19,6 +21,11 @@ export async function atelInboxList(ctx: ToolExecutionContext) {
 export async function atelSendMessage(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'messages.write');
   const parsed = SendMessageInputSchema.parse(input);
+
+  // Reject fabricated DIDs (host LLM tends to invent target DIDs from
+  // patterns like "did:atel:ed25519:alice"). Verifying first means the
+  // failure is loud + actionable, not silent dead-letter in relay queue.
+  await assertPrerequisite(ctx.session, () => targetExists(ctx, parsed.peerDid));
 
   let result: unknown;
   let backend = 'platform-hosted';

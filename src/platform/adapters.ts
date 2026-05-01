@@ -19,6 +19,27 @@ export async function registryRegister(ctx: ToolExecutionContext, input: { name:
   });
 }
 
+/**
+ * Lookup a single agent by DID. Returns null if 404, used by prerequisite
+ * checks (targetExists / executorReady) to verify a DID is real before
+ * letting host-side LLM mutate state with a fabricated DID.
+ */
+export async function getAgent(ctx: ToolExecutionContext, did: string): Promise<unknown | null> {
+  try {
+    return await ctx.platform.request<unknown>({
+      method: 'GET',
+      path: PLATFORM_ENDPOINTS.registry.agent(did),
+      bearerToken: ctx.session.bearerToken,
+    });
+  } catch (e) {
+    // 404 means agent doesn't exist — return null so caller can decide.
+    // Other errors (5xx, network) re-throw.
+    const msg = (e as Error).message ?? '';
+    if (msg.includes('404') || msg.toLowerCase().includes('not found')) return null;
+    throw e;
+  }
+}
+
 export async function getBalance(ctx: ToolExecutionContext) {
   return ctx.platform.request<unknown>({
     method: 'GET',

@@ -44,5 +44,5 @@ export async function assertPrerequisite(
 ): Promise<void> {
   const result = await check();
   if (result.ok) return;
-  throw new AtelMcpError(result.code, result.message, result.details);
+  throw new AtelMcpError(result.code, result.message, result.details, result.hint);
 }

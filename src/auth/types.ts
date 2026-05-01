@@ -52,7 +52,15 @@ export type PrerequisiteCheckResult =
   | { ok: true }
   | {
       ok: false;
-      code: 'PREREQUISITE_NOT_MET' | 'INSUFFICIENT_BALANCE' | 'ENVIRONMENT_MISMATCH';
+      code:
+        | 'PREREQUISITE_NOT_MET'
+        | 'INSUFFICIENT_BALANCE'
+        | 'ENVIRONMENT_MISMATCH'
+        | 'WALLET_NOT_READY'
+        | 'TARGET_NOT_FOUND'
+        | 'EXECUTOR_OFFLINE'
+        | 'CAPABILITY_MISMATCH';
       message: string;
       details?: Record<string, unknown>;
+      hint?: string;
     };

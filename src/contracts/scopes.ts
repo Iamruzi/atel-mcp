@@ -1,16 +1,39 @@
+/**
+ * AtelScope is a permission descriptor declared on each MCP tool. The session
+ * (issued via OAuth or DID auth) carries the scopes the user granted, and the
+ * `assertScopes` middleware in dispatch enforces them.
+ *
+ * Three tiers (strictly ordered):
+ *   1. read       — observe only, no mutation
+ *   2. write      — mutate state but reversible / no real fund movement
+ *   3. high_risk  — irreversible / real fund movement (transfer/withdraw/arbitrate)
+ *
+ * High-risk scopes are NEVER granted by default. They require explicit user
+ * grant + an approval gate (see src/approval/) before execution.
+ */
 export type AtelScope =
+  // Read scopes
   | 'identity.read'
   | 'wallet.read'
   | 'contacts.read'
-  | 'contacts.write'
   | 'messages.read'
-  | 'messages.write'
   | 'orders.read'
-  | 'orders.write'
   | 'milestones.read'
-  | 'milestones.write'
   | 'disputes.read'
-  | 'disputes.write';
+  | 'a2b.read'
+  // Write scopes (low-risk: reversible / no fund impact)
+  | 'contacts.write'
+  | 'messages.write'
+  | 'orders.write'
+  | 'milestones.write'
+  | 'disputes.write'
+  | 'a2b.write'
+  // High-risk scopes (irreversible: real fund movement, never default-granted)
+  | 'wallet.transfer'
+  | 'wallet.withdraw'
+  | 'order.arbitrate'
+  | 'dispute.resolve'
+  | 'settlement.override';
 
 export const DEFAULT_REMOTE_SCOPES: AtelScope[] = [
   'identity.read',
