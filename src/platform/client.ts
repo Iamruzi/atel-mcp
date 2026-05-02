@@ -7,6 +7,13 @@ export interface PlatformRequest {
   query?: Record<string, string | number | boolean | undefined | null>;
   body?: unknown;
   bearerToken: string;
+  /**
+   * Per-request override for the idempotency key. Most callers should leave
+   * this unset and let PlatformClient's default (set from the MCP request
+   * meta) flow through. Override only for explicit fan-out cases that need
+   * a child key distinct from the parent request id.
+   */
+  idempotencyKey?: string;
 }
 
 function normalizeQuery(query?: PlatformRequest['query']): string {
@@ -31,7 +38,21 @@ async function parseJson(response: Response): Promise<unknown> {
 }
 
 export class PlatformClient {
-  constructor(private readonly config: AtelMcpConfig) {}
+  /**
+   * `defaultIdempotencyKey` is wired from the MCP request meta in
+   * `buildRequestContext`. Every state-mutating POST automatically gets an
+   * `idempotency-key` header — so retries (host LLM resends, network
+   * blips, dispatch loop) won't create duplicate orders / messages /
+   * milestones at the platform.
+   *
+   * Without this, the only place idempotency-key flowed was the
+   * linked-runtime forwarder; the main MCP→platform path was wide open
+   * to duplicates. Caught during cross-repo audit 2026-05-02.
+   */
+  constructor(
+    private readonly config: AtelMcpConfig,
+    private readonly defaultIdempotencyKey?: string,
+  ) {}
 
   async request<T>(req: PlatformRequest): Promise<T> {
     const baseUrl = req.path.startsWith('/registry/')
@@ -40,12 +61,25 @@ export class PlatformClient {
         ? this.config.relayBaseUrl
         : this.config.platformBaseUrl;
     const url = `${baseUrl}${req.path}${normalizeQuery(req.query)}`;
+
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      authorization: `Bearer ${req.bearerToken}`,
+    };
+
+    // Inject idempotency-key on mutating requests. GETs are idempotent by
+    // HTTP semantics; including the header on them is harmless but
+    // pollutes platform logs with redundant data.
+    if (req.method === 'POST') {
+      const key = req.idempotencyKey ?? this.defaultIdempotencyKey;
+      if (key) {
+        headers['idempotency-key'] = key;
+      }
+    }
+
     const response = await fetch(url, {
       method: req.method,
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${req.bearerToken}`,
-      },
+      headers,
       body: req.body === undefined ? undefined : JSON.stringify(req.body),
     });
 
