@@ -1,6 +1,7 @@
 import {
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  RecoverInputSchema,
   RegisterEndpointInputSchema,
   RegisterUserInputSchema,
   RuntimeLinkBindInputSchema,
@@ -8,7 +9,7 @@ import {
   RuntimeLinkStatusOutputSchema,
   WhoamiOutputSchema,
 } from '../contracts/schemas.js';
-import { registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
+import { recoverIdentity, registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
 import { getRuntimeLink, removeRuntimeLink, upsertRuntimeLink } from '../runtime-links/store.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
@@ -76,6 +77,19 @@ export async function atelRegisterUser(ctx: ToolExecutionContext, input: unknown
     sourceLabel: parsed.sourceLabel ?? ctx.meta.hostName ?? 'mcp-host',
   });
   return result;
+}
+
+/**
+ * Pre-auth recovery tool. User submits the recovery code returned by
+ * atel_register_user; gets back the DID. Pairs with their stored
+ * secretKey (which they MUST have) to resume operation via DID-Sig.
+ *
+ * This is a DID lookup, not a secretKey recovery. Lost secretKey is
+ * still lost — by design, until KEK custody arrives.
+ */
+export async function atelRecover(ctx: ToolExecutionContext, input: unknown) {
+  const parsed = RecoverInputSchema.parse(input);
+  return recoverIdentity(ctx.config, parsed);
 }
 
 export async function atelAgentRegister(ctx: ToolExecutionContext, input: unknown) {

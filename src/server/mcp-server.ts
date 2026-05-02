@@ -6,6 +6,7 @@ import {
   AckInputSchema,
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  RecoverInputSchema,
   RegisterEndpointInputSchema,
   RegisterUserInputSchema,
   DisputeCreateInputSchema,
@@ -74,7 +75,8 @@ export async function createAtelMcpServer(args: {
   });
 
   server.registerTool('atel_whoami', { description: 'Return current authenticated ATEL identity and environment.' }, async () => asToolResult(await invoke('atel_whoami')));
-  server.registerTool('atel_register_user', { description: 'Mint a fresh ATEL identity end-to-end. UNAUTHENTICATED — caller has no DID yet. Returns {did, secretKey, token, walletStatus}. Save secretKey securely; use token as Bearer for subsequent calls.', inputSchema: RegisterUserInputSchema.shape }, async (input) => asToolResult(await invoke('atel_register_user', input)));
+  server.registerTool('atel_register_user', { description: 'Mint a fresh ATEL identity end-to-end. UNAUTHENTICATED — caller has no DID yet. Returns {did, secretKey, token, walletStatus, recoveryCode}. Save secretKey AND recoveryCode securely; use token as Bearer for subsequent calls.', inputSchema: RegisterUserInputSchema.shape }, async (input) => asToolResult(await invoke('atel_register_user', input)));
+  server.registerTool('atel_recover', { description: 'Look up DID by recoveryCode (returned at atel_register_user time). UNAUTHENTICATED. Use case: you kept secretKey but forgot which DID it belongs to. Lost secretKey is NOT recoverable — by design.', inputSchema: RecoverInputSchema.shape }, async (input) => asToolResult(await invoke('atel_recover', input)));
   server.registerTool('atel_runtime_link_status', { description: 'Return runtime-link status and staged execution routing metadata for the current identity.' }, async () => asToolResult(await invoke('atel_runtime_link_status')));
   server.registerTool('atel_runtime_link_bind', { description: 'Bind the current hosted DID to a runtime DID for future staged runtime dispatch.', inputSchema: RuntimeLinkBindInputSchema.shape }, async (input) => asToolResult(await invoke('atel_runtime_link_bind', input)));
   server.registerTool('atel_runtime_link_unbind', { description: 'Remove the runtime binding for the current hosted DID.' }, async () => asToolResult(await invoke('atel_runtime_link_unbind')));

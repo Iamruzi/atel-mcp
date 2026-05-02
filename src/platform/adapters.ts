@@ -23,6 +23,28 @@ export async function registerUser(
   return body;
 }
 
+/**
+ * Pre-auth: POST /auth/v1/recovery. Look up DID by recovery code.
+ * Returns 404 (generic) if not found — we surface that as a clean error
+ * up the stack rather than crashing.
+ */
+export async function recoverIdentity(
+  config: import('../config.js').AtelMcpConfig,
+  input: { recoveryCode: string },
+): Promise<unknown> {
+  const url = `${config.platformBaseUrl.replace(/\/+$/, '')}${PLATFORM_ENDPOINTS.auth.recovery}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!response.ok) {
+    throw new Error(`platform /auth/v1/recovery failed: ${response.status} ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
 export async function registrySearch(ctx: ToolExecutionContext, input: { query: string; capability?: string }) {
   return ctx.platform.request<unknown>({
     method: 'GET',

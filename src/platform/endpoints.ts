@@ -4,7 +4,8 @@ export const PLATFORM_ENDPOINTS = {
     verify: '/auth/v1/verify',
     session: '/auth/v1/session',
     me: '/auth/v1/me',
-    register: '/auth/v1/register' // T3.1.1 — mints fresh identity (no auth required)
+    register: '/auth/v1/register', // T3.1.1 — mints fresh identity (no auth required)
+    recovery: '/auth/v1/recovery'  // T3.1.5 — look up DID by recovery code (no auth required)
   },
   registry: {
     register: '/registry/v1/register',

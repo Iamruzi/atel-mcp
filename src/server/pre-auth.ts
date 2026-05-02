@@ -17,6 +17,7 @@
  */
 export const PRE_AUTH_TOOLS = new Set<string>([
   'atel_register_user',
+  'atel_recover',
 ]);
 
 export function isPreAuthTool(name: string): boolean {

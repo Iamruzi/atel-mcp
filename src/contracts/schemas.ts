@@ -24,6 +24,13 @@ export const RegisterEndpointInputSchema = z.object({
   label: z.string().min(1).max(64).optional()
 });
 
+// Onboarding (T3.1.5): look up DID by recovery code (pre-auth tool).
+// 16-char minimum is a defensive lower bound; production codes are 52
+// chars (32 bytes base32). Real validation happens server-side.
+export const RecoverInputSchema = z.object({
+  recoveryCode: z.string().min(16).max(64)
+});
+
 const RuntimeBackendSchema = z.enum(['platform-hosted', 'sdk-runtime', 'linked-runtime']);
 const UserModeSchema = z.enum(['mcp-only', 'runtime-only', 'mcp-plus-runtime']);
 const ExecutionClassSchema = z.enum(['platform-truth-read', 'platform-state-write', 'runtime-capable']);

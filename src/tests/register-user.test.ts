@@ -46,10 +46,14 @@ class CapturingAuditSink implements AuditSink {
 
 const config = loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.xyz' } as never);
 
-test('pre-auth registry: atel_register_user is registered as pre-auth', () => {
+test('pre-auth registry: atel_register_user + atel_recover are pre-auth, others are not', () => {
   assert.equal(isPreAuthTool('atel_register_user'), true);
+  assert.equal(isPreAuthTool('atel_recover'), true);
   assert.equal(isPreAuthTool('atel_whoami'), false);
-  assert.equal(PRE_AUTH_TOOLS.size, 1, 'pre-auth set should stay small; new entries need security review');
+  assert.equal(isPreAuthTool('atel_balance'), false);
+  // Pre-auth set is the unauthenticated public attack surface — keep it
+  // small. Adding entries here is a security decision (see pre-auth.ts).
+  assert.equal(PRE_AUTH_TOOLS.size, 2, 'pre-auth set should stay small; new entries need security review');
 });
 
 test('atel_register_user: forwards input to platform /auth/v1/register and returns bundle', async () => {
