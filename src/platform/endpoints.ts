@@ -51,7 +51,10 @@ export const PLATFORM_ENDPOINTS = {
     list: '/dispute/v1/list',
     create: '/dispute/v1/open',
     remoteCreate: '/dispute/v1/remote/open',
-    detail: (disputeId: string) => `/dispute/v1/${encodeURIComponent(disputeId)}`
+    detail: (disputeId: string) => `/dispute/v1/${encodeURIComponent(disputeId)}`,
+    // T3.6.2 — arbitrator action. Only the platform DID (or DIDs in the
+    // arbitrator allowlist) can call this; platform enforces.
+    resolve: (disputeId: string) => `/dispute/v1/${encodeURIComponent(disputeId)}/resolve`
   },
   a2b: {
     search: '/trade/v1/a2b/bitrefill/search',

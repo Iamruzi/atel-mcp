@@ -145,8 +145,25 @@ export const MilestoneSubmitInputSchema = MilestoneActionInputSchema.extend({
 
 export const DisputeCreateInputSchema = z.object({
   orderId: OrderIdSchema,
-  reason: z.string().min(1).max(4000)
+  // T3.6.3: min 100 chars forces meaningful explanation. Anti-drift case
+  // from production: host LLM submits "didn't work" as reason, arbitrator
+  // can't decide. 100 chars ≈ 2 short sentences — enough for context.
+  reason: z.string().min(100, 'reason must be >=100 chars to support arbitration').max(4000)
 });
+
+// T3.6.2 — Platform DID arbitration. verdict picks the winning side or a
+// proportional split. split_ratio is required iff verdict='split'.
+export const DisputeResolveInputSchema = z.object({
+  disputeId: z.string().min(1),
+  verdict: z.enum(['favor_requester', 'favor_executor', 'split']),
+  // 0..1, fraction going to the REQUESTER (the rest goes to executor).
+  // Only used when verdict='split'.
+  splitRatio: z.number().min(0).max(1).optional(),
+  notes: z.string().min(20, 'arbitrator notes must be >=20 chars').max(4000)
+}).refine(
+  (val) => val.verdict !== 'split' || typeof val.splitRatio === 'number',
+  { message: 'splitRatio is required when verdict=split', path: ['splitRatio'] },
+);
 
 export const AuditOrderQueryInputSchema = z.object({
   orderId: OrderIdSchema,

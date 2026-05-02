@@ -10,6 +10,7 @@ import {
   RegisterEndpointInputSchema,
   RegisterUserInputSchema,
   DisputeCreateInputSchema,
+  DisputeResolveInputSchema,
   AuditOrderQueryInputSchema,
   AuditRequestQueryInputSchema,
   AuditSessionQueryInputSchema,
@@ -105,7 +106,8 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_milestone_reject', { description: 'Reject milestone content with feedback.', inputSchema: { orderId: z.string().min(1).startsWith('ord-'), index: z.number().int().min(0).max(9), content: z.string().min(1) } }, async (input) => asToolResult(await invoke('atel_milestone_reject', input)));
   server.registerTool('atel_dispute_get', { description: 'Get dispute details.', inputSchema: disputeIdInput() }, async (input) => asToolResult(await invoke('atel_dispute_get', input)));
   server.registerTool('atel_dispute_list', { description: 'List disputes for current DID.' }, async () => asToolResult(await invoke('atel_dispute_list')));
-  server.registerTool('atel_dispute_create', { description: 'Create a dispute for an order.', inputSchema: DisputeCreateInputSchema.shape }, async (input) => asToolResult(await invoke('atel_dispute_create', input)));
+  server.registerTool('atel_dispute_create', { description: 'Create a dispute for an order. Requires >=3 rejections on a milestone (otherwise returns PREREQUISITE_NOT_MET). reason must be >=100 chars.', inputSchema: DisputeCreateInputSchema.shape }, async (input) => asToolResult(await invoke('atel_dispute_create', input)));
+  server.registerTool('atel_dispute_resolve', { description: 'Submit arbitration verdict (favor_requester|favor_executor|split). High-risk: this releases locked escrow. Requires dispute.resolve scope (high-risk tier, never default-granted) AND platform-side arbitrator allowlist membership.' }, async (input) => asToolResult(await invoke('atel_dispute_resolve', input)));
   server.registerTool('atel_audit_order_get', { description: 'Read the audit trail for an order.', inputSchema: AuditOrderQueryInputSchema.shape }, async (input) => asToolResult(await invoke('atel_audit_order_get', input)));
   server.registerTool('atel_audit_session_get', { description: 'Read the audit trail for the current or specified session.', inputSchema: AuditSessionQueryInputSchema.shape }, async (input) => asToolResult(await invoke('atel_audit_session_get', input)));
   server.registerTool('atel_audit_request_get', { description: 'Read the audit trail for a specific request.', inputSchema: AuditRequestQueryInputSchema.shape }, async (input) => asToolResult(await invoke('atel_audit_request_get', input)));

@@ -304,6 +304,48 @@ export async function milestoneIsSubmitted(
   }
 }
 
+/**
+ * T3.6.1 — Dispute creation requires that at least one milestone has been
+ * rejected `>= threshold` times. Without this gate, host LLM can open a
+ * dispute on the very first reject (or even with no rejects at all),
+ * filling the arbitration queue with noise.
+ *
+ * Default threshold is 3 (matches platform's auto-arbitration trigger).
+ */
+export async function disputeRejectThresholdMet(
+  ctx: ToolExecutionContext,
+  orderId: string,
+  threshold = 3,
+): Promise<PrerequisiteCheckResult> {
+  try {
+    const milestones = (await listMilestones(ctx, orderId)) as
+      | Array<{ rejectCount?: number; reject_count?: number }>
+      | { milestones?: Array<{ rejectCount?: number; reject_count?: number }> };
+    const list = Array.isArray(milestones) ? milestones : (milestones.milestones ?? []);
+    let maxRejects = 0;
+    for (const m of list) {
+      const n = Number(m.rejectCount ?? m.reject_count ?? 0);
+      if (n > maxRejects) maxRejects = n;
+    }
+    if (maxRejects < threshold) {
+      return {
+        ok: false,
+        code: 'PREREQUISITE_NOT_MET',
+        message: `dispute requires a milestone with >=${threshold} rejections (highest seen: ${maxRejects})`,
+        details: { orderId, threshold, observedMax: maxRejects },
+        hint: `Reject the failing milestone (atel_milestone_reject) until rejectCount reaches ${threshold}, then dispute. Below this threshold, use direct comms — disputes go to arbitrator queue.`,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'PREREQUISITE_NOT_MET',
+      message: `cannot check milestone rejection history: ${(e as Error).message}`,
+    };
+  }
+}
+
 export async function executorReady(
   ctx: ToolExecutionContext,
   executorDid: string,

@@ -415,3 +415,24 @@ export async function createDispute(ctx: ToolExecutionContext, input: { orderId:
     bearerToken: ctx.session.bearerToken,
   });
 }
+
+/**
+ * T3.6.2 — Submit arbitration verdict. Caller must be on platform's
+ * arbitrator allowlist (platform DID by default). Platform persists
+ * verdict and triggers escrow split / release accordingly.
+ */
+export async function resolveDispute(
+  ctx: ToolExecutionContext,
+  input: { disputeId: string; verdict: string; splitRatio?: number; notes: string },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.dispute.resolve(input.disputeId),
+    body: {
+      verdict: input.verdict,
+      splitRatio: input.splitRatio,
+      notes: input.notes,
+    },
+    bearerToken: ctx.session.bearerToken,
+  });
+}

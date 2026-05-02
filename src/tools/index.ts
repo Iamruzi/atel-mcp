@@ -40,6 +40,7 @@ export const TOOL_HANDLERS = {
   atel_dispute_get: dispute.atelDisputeGet,
   atel_dispute_list: dispute.atelDisputeList,
   atel_dispute_create: dispute.atelDisputeCreate,
+  atel_dispute_resolve: dispute.atelDisputeResolve,
   atel_audit_order_get: audit.atelAuditOrderGet,
   atel_audit_session_get: audit.atelAuditSessionGet,
   atel_audit_request_get: audit.atelAuditRequestGet,

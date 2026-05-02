@@ -77,6 +77,7 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_audit_session_get: { all: ['identity.read'] },
   atel_audit_request_get: { all: ['identity.read'] },
   atel_dispute_create: { all: ['disputes.write'] },
+  atel_dispute_resolve: { all: ['dispute.resolve'] },
   atel_a2b_search: { all: ['a2b.read'] },
   atel_a2b_purchase_list: { all: ['a2b.read'] },
   atel_a2b_purchase_get: { all: ['a2b.read'] },
