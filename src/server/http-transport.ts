@@ -9,6 +9,7 @@ import { MVP_MANIFEST } from './manifest.js';
 import { createOAuthBridge } from './oauth.js';
 import { AtelMcpError } from '../contracts/errors.js';
 import { parseDeclaredUserMode, parsePreferredRuntimeBackend } from './execution-routing.js';
+import { renderMetrics } from './metrics.js';
 
 const MCP_VERSION = '0.1.0';
 
@@ -90,6 +91,12 @@ export function createHttpTransportApp() {
       publicBaseUrl: config.publicBaseUrl,
       oauthIssuerUrl: config.oauthIssuerUrl,
     });
+  });
+
+  // T8.1 — Prometheus exposition. Cardinality is bounded (tool name +
+  // status enum + collapsed platform path).
+  app.get(route('/metrics'), async (_req: Request, res: Response) => {
+    res.type('text/plain; version=0.0.4').send(renderMetrics());
   });
 
   app.get(route('/.well-known/atel-mcp.json'), async (_req: Request, res: Response) => {

@@ -21,9 +21,50 @@ export async function atelBalance(ctx: ToolExecutionContext) {
   return getBalance(ctx);
 }
 
+/**
+ * Deposit info enriched with cross-chain bridge hints.
+ *
+ * Platform returns chainAddresses (base/bsc EVM 0x..40, fast 64-hex
+ * pubkey). MCP layer adds:
+ *   - bech32m form for the Fast address (the actual format users see in
+ *     wallets like AllSet)
+ *   - bridge hints (AllSet URL for moving USDC into the Fast network)
+ *   - per-chain "send only USDC" reminder so the LLM doesn't tell users
+ *     to deposit ETH/BNB into smart wallet addresses (silent loss).
+ */
 export async function atelDepositInfo(ctx: ToolExecutionContext) {
   requireScope(ctx, 'wallet.read');
-  return getDepositInfo(ctx);
+  const platformResp = (await getDepositInfo(ctx)) as {
+    chainAddresses?: Record<string, string>;
+    [k: string]: unknown;
+  } | null;
+
+  const addresses = platformResp?.chainAddresses ?? {};
+  const enriched: Record<string, unknown> = {};
+  for (const [chain, addr] of Object.entries(addresses)) {
+    if (typeof addr !== 'string' || !addr) continue;
+    enriched[chain] = {
+      address: addr,
+      reminder: 'Send only USDC. Native tokens (ETH/BNB on EVM, FAST on Fast) sent to this address are NOT recoverable.',
+    };
+  }
+
+  const fastAddr = addresses.fast;
+  const fastHints = fastAddr
+    ? {
+        // Fast addresses can be surfaced as bech32m for wallets like
+        // AllSet. We include both forms so callers don't have to convert.
+        rawHex: fastAddr,
+        bridgeHint:
+          'No native USDC bridge to Fast yet. Use AllSet (https://allset.world) to bridge from Base/BSC USDC to Fast Network.',
+      }
+    : null;
+
+  return {
+    ...platformResp,
+    chainAddresses: enriched,
+    fastNetwork: fastHints,
+  };
 }
 
 /**

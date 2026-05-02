@@ -10,6 +10,7 @@ import { buildExecutionRoutePlan } from './execution-routing.js';
 import { getRuntimeLink } from '../runtime-links/store.js';
 import { isPreAuthTool } from './pre-auth.js';
 import { PlatformClient } from '../platform/client.js';
+import { recordToolCall, recordDispatch } from './metrics.js';
 import type { AtelMcpConfig } from '../config.js';
 
 export interface DispatchToolInput {
@@ -93,7 +94,9 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
     assertRemoteEnvironmentAllowed(ctx.session, args.config.allowCustomRemoteMcp ? ['production', 'custom'] : ['production']);
     const requirements = TOOL_SCOPE_REQUIREMENTS[args.toolName];
     if (requirements) assertScopes(ctx.session, { requireAll: requirements.all, requireAny: requirements.any });
+    recordDispatch(args.toolName, 'ok');
   } catch (error) {
+    recordDispatch(args.toolName, 'denied');
     await ctx.emitAudit({
       ...childAuditBase(ctx),
       type: 'guard.rejected',
@@ -109,8 +112,10 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
   }
 
   const handler = getToolHandler(args.toolName as ToolName);
+  const handlerStart = Date.now();
   try {
     const result = await handler(ctx as never, args.input as never);
+    recordToolCall(args.toolName, 'ok', Date.now() - handlerStart);
     await ctx.emitAudit({
       ...childAuditBase(ctx),
       type: 'tool.succeeded',
@@ -120,6 +125,7 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
     });
     return result;
   } catch (error) {
+    recordToolCall(args.toolName, 'error', Date.now() - handlerStart);
     await ctx.emitAudit({
       ...childAuditBase(ctx),
       type: 'tool.failed',
