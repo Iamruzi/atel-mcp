@@ -209,6 +209,20 @@ export const A2bIntentCreateInputSchema = z.object({
   country: z.string().min(2).max(40).optional()
 });
 
+// T3.4.1 — server-side quote calculation. Anti-drift principle #1:
+// host doesn't compute amount, doesn't guess prices. It picks (productId,
+// value) and the platform calls Bitrefill to get the actual USDC charge.
+// The returned `quotedPriceUsdc` is the source of truth for the
+// downstream lock_funds / execute_purchase amount.
+export const A2bQuoteInputSchema = z.object({
+  // Original search query — platform uses it to ensure quote matches
+  // what the user searched for (defense against productId spoofing).
+  query: z.string().min(1).max(200),
+  productId: z.string().min(1).max(200),
+  value: z.number().positive().max(10000),
+  country: z.string().min(2).max(40).optional()
+});
+
 export const A2bLockFundsInputSchema = z.object({
   intentId: A2bIntentIdSchema,
   // amount is USDC decimal (NOT raw). Server enforces it equals the

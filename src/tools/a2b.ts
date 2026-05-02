@@ -25,6 +25,7 @@ import {
   A2bIntentCreateInputSchema,
   A2bLockFundsInputSchema,
   A2bExecutePurchaseInputSchema,
+  A2bQuoteInputSchema,
 } from '../contracts/schemas.js';
 import {
   a2bSearch,
@@ -35,6 +36,7 @@ import {
   a2bDeposit,
   a2bCreateInvoice,
   a2bPay,
+  a2bQuote,
   getBalance,
 } from '../platform/adapters.js';
 import type { ToolExecutionContext } from '../server/context.js';
@@ -69,6 +71,28 @@ export async function atelA2bPurchaseList(ctx: ToolExecutionContext, input?: unk
   requireScope(ctx, 'a2b.read');
   const parsed = A2bPurchaseListInputSchema.parse(input ?? {});
   return a2bList(ctx, parsed);
+}
+
+/**
+ * T3.4.1 — Get the live USDC quote for a product+value combo. Server
+ * hits Bitrefill, returns the actual price the next purchase will cost.
+ *
+ * Anti-drift wins this tool enforces:
+ *   1. Host LLM doesn't compute amount. Doesn't guess price. Doesn't
+ *      use training data exchange rates ("$10 ≈ 0.0034 BTC * USDT
+ *      rate ≈ ..."). Just picks (productId, value), gets the real
+ *      number from Bitrefill via platform.
+ *   2. The returned `quotedPriceUsdc` is the source of truth for the
+ *      downstream lock_funds amount. Schema enforces non-zero positive
+ *      response by the platform side.
+ *   3. Caller is encouraged (in tool description) to call this BEFORE
+ *      lock_funds — using the quote saves the "I lock 5 USDC but the
+ *      card actually costs 5.30" failure mode.
+ */
+export async function atelA2bQuote(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'a2b.read');
+  const parsed = A2bQuoteInputSchema.parse(input);
+  return a2bQuote(ctx, parsed);
 }
 
 export async function atelA2bPurchaseGet(ctx: ToolExecutionContext, input: unknown) {

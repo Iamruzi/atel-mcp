@@ -80,6 +80,7 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_a2b_search: { all: ['a2b.read'] },
   atel_a2b_purchase_list: { all: ['a2b.read'] },
   atel_a2b_purchase_get: { all: ['a2b.read'] },
+  atel_a2b_quote: { all: ['a2b.read'] },
   atel_a2b_intent_create: { all: ['a2b.write'] },
   atel_a2b_lock_funds: { all: ['a2b.write'] },
   atel_a2b_execute_purchase: { all: ['a2b.write'] },

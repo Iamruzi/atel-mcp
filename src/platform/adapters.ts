@@ -116,6 +116,24 @@ export async function a2bRedemptionReveal(ctx: ToolExecutionContext, intentId: s
   });
 }
 
+/**
+ * T3.4.1 — Server-side quote calculation. Returns the live USDC price
+ * Bitrefill would charge for the requested (productId, value) tuple.
+ * The `quotedPriceUsdc` field is the source of truth for the downstream
+ * lock_funds amount; host should NOT compute it locally.
+ */
+export async function a2bQuote(
+  ctx: ToolExecutionContext,
+  input: { query: string; productId: string; value: number; country?: string },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.a2b.quote,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
 export async function a2bIntent(
   ctx: ToolExecutionContext,
   input: { productId: string; value: number; country?: string },

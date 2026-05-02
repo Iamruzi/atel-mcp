@@ -62,6 +62,10 @@ export const PLATFORM_ENDPOINTS = {
     redemption: '/trade/v1/a2b/bitrefill/redemption',
     list: '/trade/v1/a2b/list',
     detail: (intentId: string) => `/trade/v1/a2b/detail/${encodeURIComponent(intentId)}`,
-    redemptionReveal: (intentId: string) => `/trade/v1/a2b/redemption-reveal/${encodeURIComponent(intentId)}`
+    redemptionReveal: (intentId: string) => `/trade/v1/a2b/redemption-reveal/${encodeURIComponent(intentId)}`,
+    // T3.4.1 — server-side amount calculation, hits Bitrefill for live
+    // pricing. Lives under /remote/ JWT path because the endpoint takes
+    // the user's DID from the bearer.
+    quote: '/trade/v1/remote/a2b/quote-preview'
   }
 } as const;
