@@ -1,3 +1,28 @@
+// OpenClaw plugin → ATEL Remote MCP bridge.
+//
+// Exposes ONE OpenClaw tool (`atel_mcp`) with two actions:
+//   - action=list  → list remote ATEL MCP tools
+//   - action=call  → call one remote ATEL MCP tool with JSON args
+//
+// Auth model: DID-Sig.
+//   1. Plugin reads ed25519 secret key from identity.json
+//   2. Plugin builds a SignedRequest envelope (one-time, then cached)
+//   3. POST envelope to platform /auth/v1/did-sig → bearer token
+//   4. Plugin uses bearer to call MCP server's /mcp endpoint
+//
+// Why not OAuth: OAuth requires a browser interaction. OpenClaw is a
+// background daemon — no browser. DID-Sig is the headless equivalent.
+//
+// Why not local signing + direct platform POST (the prior design):
+//   - Bypassed MCP's anti-drift layer (schema enforcement / prerequisite
+//     checks / approval gate / actionable error hints)
+//   - 5 LOCAL_SIGNED_TOOLS effectively gave OpenClaw users no
+//     reliability protection that other ATEL clients enjoyed
+//   - Cross-repo audit (2026-05-02) flagged this as the largest reliability
+//     gap. Prior commit added platform-side prereq tools as a bottom-up
+//     defense; THIS commit closes the gap top-down by routing OpenClaw
+//     through MCP's full anti-drift stack.
+
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -25,18 +50,14 @@ const DEFAULT_CONFIG = {
 };
 
 const sessionCache = new WeakMap();
-const OAUTH_CACHE_PATH = process.env.ATEL_MCP_OAUTH_CACHE_PATH || path.join(
+
+// Persistent cache so a plugin restart doesn't force a fresh DID-Sig
+// exchange (saves ~1 round-trip + signing on every cold boot).
+const TOKEN_CACHE_PATH = process.env.ATEL_MCP_TOKEN_CACHE_PATH || path.join(
   process.env.HOME || process.env.USERPROFILE || ".",
   ".openclaw",
-  "atel-mcp-oauth-cache.json",
+  "atel-mcp-did-sig-cache.json",
 );
-const LOCAL_SIGNED_TOOLS = new Set([
-  "atel_order_create",
-  "atel_order_accept",
-  "atel_milestone_submit",
-  "atel_milestone_verify",
-  "atel_dispute_create",
-]);
 
 function textResult(data, isError = false) {
   return {
@@ -60,74 +81,62 @@ function decodeSecretKey(raw) {
   throw new Error("Unsupported secretKey format in identity.json");
 }
 
-function base64Url(buffer) {
-  return Buffer.from(buffer).toString("base64url");
-}
-
-function makePkce() {
-  const verifier = base64Url(crypto.randomBytes(32));
-  const challenge = base64Url(crypto.createHash("sha256").update(verifier).digest());
-  return { verifier, challenge };
-}
-
 function ensureParentDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
-function readOauthCacheFile() {
+function readTokenCacheFile() {
   try {
-    if (!fs.existsSync(OAUTH_CACHE_PATH)) {
-      return {};
-    }
-    const parsed = JSON.parse(fs.readFileSync(OAUTH_CACHE_PATH, "utf8"));
+    if (!fs.existsSync(TOKEN_CACHE_PATH)) return {};
+    const parsed = JSON.parse(fs.readFileSync(TOKEN_CACHE_PATH, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
 
-function writeOauthCacheFile(cache) {
-  ensureParentDir(OAUTH_CACHE_PATH);
-  fs.writeFileSync(OAUTH_CACHE_PATH, JSON.stringify(cache, null, 2));
+function writeTokenCacheFile(cache) {
+  ensureParentDir(TOKEN_CACHE_PATH);
+  fs.writeFileSync(TOKEN_CACHE_PATH, JSON.stringify(cache, null, 2));
 }
 
-function buildOauthCacheKey(config, identity, scopes) {
+function tokenCacheKey(config, identity) {
+  // Server URL + DID + platform URL is sufficient to uniquely scope a
+  // bearer. We don't bake scope strings in because DID-Sig issues full
+  // session bearers; scope filtering is done by MCP server-side.
   return [
     normalizeBaseUrl(config.serverBaseUrl),
     normalizeBaseUrl(config.platformBaseUrl),
     identity.did,
-    scopes.join(" "),
   ].join("|");
 }
 
-function getPersistedOauthCache(config, identity, scopes) {
-  const cache = readOauthCacheFile();
-  const key = buildOauthCacheKey(config, identity, scopes);
+function getPersistedToken(config, identity) {
+  const cache = readTokenCacheFile();
+  const key = tokenCacheKey(config, identity);
   const entry = cache[key];
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-  return { key, entry };
+  if (!entry || typeof entry !== "object") return null;
+  return entry;
 }
 
-function savePersistedOauthCache(config, identity, scopes, patch) {
-  const cache = readOauthCacheFile();
-  const key = buildOauthCacheKey(config, identity, scopes);
+function savePersistedToken(config, identity, patch) {
+  const cache = readTokenCacheFile();
+  const key = tokenCacheKey(config, identity);
   cache[key] = {
     ...(cache[key] || {}),
     ...patch,
     updatedAt: new Date().toISOString(),
   };
-  writeOauthCacheFile(cache);
+  writeTokenCacheFile(cache);
   return cache[key];
 }
 
-function clearPersistedOauthCache(config, identity, scopes) {
-  const cache = readOauthCacheFile();
-  const key = buildOauthCacheKey(config, identity, scopes);
+function clearPersistedToken(config, identity) {
+  const cache = readTokenCacheFile();
+  const key = tokenCacheKey(config, identity);
   if (cache[key]) {
     delete cache[key];
-    writeOauthCacheFile(cache);
+    writeTokenCacheFile(cache);
   }
 }
 
@@ -148,14 +157,11 @@ function readPluginConfig(runtime) {
   };
 }
 
-function requireReadableFile(filePath, label) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`${label} not found: ${filePath}`);
-  }
-  return filePath;
-}
-
 function serializePayloadLocal(obj) {
+  // Same canonical-JSON rules platform's auth.SortedJSON produces. Keys
+  // sorted alphabetically (recursive); arrays preserved; leaves stringify
+  // in standard JSON. SDK exports the same function; we prefer SDK's
+  // version when available (resolveSerializePayload) so we never drift.
   return JSON.stringify(obj, (_key, value) => {
     if (value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Uint8Array)) {
       const sorted = {};
@@ -213,9 +219,7 @@ async function readJson(response) {
 
 async function parseMcpPayload(response) {
   const raw = await response.text();
-  if (!raw) {
-    return null;
-  }
+  if (!raw) return null;
 
   const tryParse = (text) => {
     try {
@@ -226,10 +230,10 @@ async function parseMcpPayload(response) {
   };
 
   const direct = tryParse(raw);
-  if (direct) {
-    return direct;
-  }
+  if (direct) return direct;
 
+  // Streamable HTTP transport may return SSE-framed JSON. Parse the last
+  // data: line which carries the actual response.
   const eventLines = raw
     .split(/\n/)
     .filter((line) => line.startsWith("data:"))
@@ -238,12 +242,58 @@ async function parseMcpPayload(response) {
 
   for (const line of eventLines.reverse()) {
     const parsed = tryParse(line);
-    if (parsed) {
-      return parsed;
-    }
+    if (parsed) return parsed;
   }
 
   throw new Error(`Unable to parse MCP response: ${raw.slice(0, 500)}`);
+}
+
+// ─── DID-Sig auth ─────────────────────────────────────────────────────
+
+async function exchangeDidSigForToken(config) {
+  // One round-trip:
+  //   plugin builds SignedRequest envelope → POST platform /auth/v1/did-sig
+  //   → bearer token (7-day expiry)
+  // Replaces the previous 5-step OAuth PKCE dance entirely.
+  const identityPath = resolveIdentityPath(config.identityPath);
+  const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+  const secretKey = decodeSecretKey(identity.secretKey);
+
+  const serializePayload = await resolveSerializePayload(config);
+  const nacl = await resolveNacl(config);
+
+  const timestamp = new Date().toISOString();
+  const nonce = crypto.randomBytes(16).toString("hex");
+  // Payload is the signed body. nonce makes the signed bytes unique per
+  // request — defense-in-depth against signature replay even within the
+  // 5-min ts window platform enforces.
+  const payload = { nonce };
+  const signable = serializePayload({ payload, did: identity.did, timestamp });
+  const signature = Buffer.from(nacl.sign.detached(Buffer.from(signable), secretKey)).toString("base64");
+
+  const envelope = { did: identity.did, payload, timestamp, signature };
+
+  const response = await fetch(`${config.platformBaseUrl}/auth/v1/did-sig`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(envelope),
+  });
+  const body = await readJson(response);
+  if (!response.ok || typeof body?.token !== "string") {
+    throw new Error(`DID-Sig exchange failed: ${response.status} ${JSON.stringify(body)}`);
+  }
+
+  // expiresAt comes back as unix seconds; normalize to ms.
+  const expiresAtMs = typeof body.expiresAt === "number"
+    ? body.expiresAt * 1000
+    : Date.now() + 7 * 24 * 3600_000;
+
+  return {
+    accessToken: body.token,
+    expiresAt: expiresAtMs,
+    did: identity.did,
+    identity, // returned so caller can persist scoped to this DID
+  };
 }
 
 async function getAccessToken(runtime) {
@@ -255,385 +305,46 @@ async function getAccessToken(runtime) {
   const config = readPluginConfig(runtime);
   const identityPath = resolveIdentityPath(config.identityPath);
   const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
-  const secretKey = decodeSecretKey(identity.secretKey);
 
-  const serializePayload = await resolveSerializePayload(config);
-  const nacl = await resolveNacl(config);
-
-  const persisted = getPersistedOauthCache(config, identity, config.scopes);
-  const redirectUri = "https://atel.local/callback";
-  const { verifier, challenge } = makePkce();
-
-  if (
-    persisted?.entry?.client?.client_id &&
-    typeof persisted.entry?.refreshToken === "string" &&
-    persisted.entry.refreshToken
-  ) {
-    const refreshParams = new URLSearchParams({
-      grant_type: "refresh_token",
-      client_id: String(persisted.entry.client.client_id),
-      refresh_token: persisted.entry.refreshToken,
+  // Try persisted cache first (across plugin restarts).
+  const persisted = getPersistedToken(config, identity);
+  if (persisted?.accessToken && persisted?.expiresAt > Date.now() + 30_000) {
+    sessionCache.set(runtime, {
+      accessToken: persisted.accessToken,
+      expiresAt: persisted.expiresAt,
+      initialized: false,
+      sessionId: null,
+      requestSeq: 0,
     });
-    const refreshResponse = await fetch(`${config.serverBaseUrl}/token`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: refreshParams.toString(),
-    });
-    const refreshPayload = await readJson(refreshResponse);
-    if (refreshResponse.ok && typeof refreshPayload?.access_token === "string") {
-      const nextRefreshToken =
-        typeof refreshPayload?.refresh_token === "string" && refreshPayload.refresh_token
-          ? refreshPayload.refresh_token
-          : persisted.entry.refreshToken;
-      savePersistedOauthCache(config, identity, config.scopes, {
-        client: persisted.entry.client,
-        refreshToken: nextRefreshToken,
-      });
-      sessionCache.set(runtime, {
-        accessToken: refreshPayload.access_token,
-        expiresAt: Date.now() + (Number(refreshPayload.expires_in || 3600) * 1000),
-        initialized: false,
-        sessionId: null,
-        requestSeq: 0,
-      });
-      return refreshPayload.access_token;
-    }
-
-    clearPersistedOauthCache(config, identity, config.scopes);
+    return persisted.accessToken;
   }
 
-  const registrationBody = {
-    client_name: "OpenClaw ATEL MCP Bridge",
-    redirect_uris: [redirectUri],
-    grant_types: ["authorization_code", "refresh_token"],
-    response_types: ["code"],
-    token_endpoint_auth_method: "none",
-  };
-
-  let registeredClient = persisted?.entry?.client ?? null;
-  if (!registeredClient?.client_id) {
-    const registerResponse = await fetch(`${config.serverBaseUrl}/register`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(registrationBody),
-    });
-    registeredClient = await readJson(registerResponse);
-    if (!registerResponse.ok) {
-      throw new Error(`MCP register failed: ${registerResponse.status} ${JSON.stringify(registeredClient)}`);
-    }
+  // Fresh exchange.
+  let issued;
+  try {
+    issued = await exchangeDidSigForToken(config);
+  } catch (e) {
+    // Wipe stale persisted entry if exchange fails — next attempt starts clean.
+    clearPersistedToken(config, identity);
+    throw e;
   }
 
-  const authorizeUrl = new URL(`${config.serverBaseUrl}/authorize`);
-  authorizeUrl.searchParams.set("client_id", String(registeredClient.client_id));
-  authorizeUrl.searchParams.set("redirect_uri", redirectUri);
-  authorizeUrl.searchParams.set("response_type", "code");
-  authorizeUrl.searchParams.set("code_challenge", challenge);
-  authorizeUrl.searchParams.set("code_challenge_method", "S256");
-  authorizeUrl.searchParams.set("scope", config.scopes.join(" "));
-  authorizeUrl.searchParams.set("state", "openclaw-atel-mcp");
-
-  const authorizeResponse = await fetch(authorizeUrl, { method: "GET", redirect: "manual" });
-  const interactiveLocation = authorizeResponse.headers.get("location");
-  if (authorizeResponse.status !== 302 || !interactiveLocation) {
-    throw new Error(`MCP authorize failed: ${authorizeResponse.status}`);
-  }
-
-  const sessionId = new URL(interactiveLocation).searchParams.get("session");
-  if (!sessionId) {
-    throw new Error("MCP authorize did not return session id");
-  }
-
-  const pendingResponse = await fetch(`${config.serverBaseUrl}/oauth/authorize/interactive/status/${encodeURIComponent(sessionId)}`);
-  const pendingPayload = await readJson(pendingResponse);
-  if (pendingPayload?.status !== "pending" || typeof pendingPayload?.code !== "string") {
-    throw new Error(`Unexpected authorization status: ${JSON.stringify(pendingPayload)}`);
-  }
-
-  const timestamp = new Date().toISOString();
-  const payload = { code: pendingPayload.code, did: identity.did, timestamp };
-  const signable = serializePayload({ payload, did: identity.did, timestamp });
-  const signature = Buffer.from(nacl.sign.detached(Buffer.from(signable), secretKey)).toString("base64");
-
-  const verifyResponse = await fetch(`${config.platformBaseUrl}/auth/v1/verify`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      code: pendingPayload.code,
-      did: identity.did,
-      signature,
-      timestamp,
-    }),
-  });
-  const verifyPayload = await readJson(verifyResponse);
-  if (!verifyResponse.ok) {
-    throw new Error(`Platform verify failed: ${verifyResponse.status} ${JSON.stringify(verifyPayload)}`);
-  }
-
-  let statusPayload = null;
-  for (let i = 0; i < 15; i += 1) {
-    const statusResponse = await fetch(`${config.serverBaseUrl}/oauth/authorize/interactive/status/${encodeURIComponent(sessionId)}`, {
-      cache: "no-store",
-    });
-    statusPayload = await readJson(statusResponse);
-    if (statusPayload?.status === "verified" && statusPayload?.redirectTo) {
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  if (!statusPayload?.redirectTo) {
-    throw new Error(`Authorization code not issued: ${JSON.stringify(statusPayload)}`);
-  }
-
-  const authorizationCode = new URL(statusPayload.redirectTo).searchParams.get("code");
-  if (!authorizationCode) {
-    throw new Error("Authorization code missing from redirect");
-  }
-
-  const tokenResponse = await fetch(`${config.serverBaseUrl}/token`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: String(registeredClient.client_id),
-      code: authorizationCode,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-    }).toString(),
-  });
-  const tokenPayload = await readJson(tokenResponse);
-  if (!tokenResponse.ok || typeof tokenPayload?.access_token !== "string") {
-    throw new Error(`Token exchange failed: ${tokenResponse.status} ${JSON.stringify(tokenPayload)}`);
-  }
-
-  savePersistedOauthCache(config, identity, config.scopes, {
-    client: registeredClient,
-    refreshToken: typeof tokenPayload?.refresh_token === "string" ? tokenPayload.refresh_token : undefined,
+  savePersistedToken(config, identity, {
+    accessToken: issued.accessToken,
+    expiresAt: issued.expiresAt,
   });
 
   sessionCache.set(runtime, {
-    accessToken: tokenPayload.access_token,
-    expiresAt: Date.now() + (Number(tokenPayload.expires_in || 3600) * 1000),
+    accessToken: issued.accessToken,
+    expiresAt: issued.expiresAt,
     initialized: false,
     sessionId: null,
     requestSeq: 0,
   });
-  return tokenPayload.access_token;
+  return issued.accessToken;
 }
 
-async function loadSigningContext(runtime) {
-  const config = readPluginConfig(runtime);
-  const identityPath = resolveIdentityPath(config.identityPath);
-  const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
-  const secretKey = decodeSecretKey(identity.secretKey);
-
-  const serializePayload = await resolveSerializePayload(config);
-  const nacl = await resolveNacl(config);
-
-  return {
-    config,
-    identity,
-    secretKey,
-    serializePayload,
-    nacl,
-  };
-}
-
-function buildSignedEnvelope(signing, payload) {
-  const timestamp = new Date().toISOString();
-  const signable = signing.serializePayload({
-    payload,
-    did: signing.identity.did,
-    timestamp,
-  });
-  const signature = Buffer.from(
-    signing.nacl.sign.detached(Buffer.from(signable), signing.secretKey),
-  ).toString("base64");
-
-  return {
-    did: signing.identity.did,
-    payload,
-    timestamp,
-    signature,
-  };
-}
-
-async function signedPlatformRequestWithContext(signing, method, pathName, payload) {
-  const response = await fetch(`${signing.config.platformBaseUrl}${pathName}`, {
-    method,
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json",
-    },
-    body: JSON.stringify(buildSignedEnvelope(signing, payload)),
-  });
-  const body = await readJson(response);
-  if (!response.ok) {
-    throw new Error(`Platform ${method} ${pathName} failed: ${response.status} ${JSON.stringify(body)}`);
-  }
-  return body;
-}
-
-async function signedPlatformRequest(runtime, method, pathName, payload) {
-  const signing = await loadSigningContext(runtime);
-  return signedPlatformRequestWithContext(signing, method, pathName, payload);
-}
-
-function signTaskRequest(signing, taskRequest) {
-  const signable = JSON.stringify({
-    capability: taskRequest.capability,
-    description: taskRequest.description,
-    executorDid: taskRequest.executorDid,
-    payload: taskRequest.payload,
-    requesterDid: taskRequest.requesterDid,
-    taskId: taskRequest.taskId,
-    timestamp: taskRequest.timestamp,
-    version: taskRequest.version,
-  });
-  return Buffer.from(signing.nacl.sign.detached(Buffer.from(signable), signing.secretKey)).toString("base64");
-}
-
-function normalizeOrderCreateArgs(input) {
-  return {
-    executorDid: String(input?.executorDid || "").trim(),
-    capabilityType: String(input?.capabilityType || "").trim(),
-    description: String(input?.description || "").trim(),
-    priceUsdc: Number(input?.priceUsdc ?? 0),
-    chain: typeof input?.chain === "string" && input.chain.trim() ? input.chain.trim() : undefined,
-  };
-}
-
-function normalizeMilestoneArgs(input) {
-  return {
-    orderId: String(input?.orderId || "").trim(),
-    index: Number(input?.index),
-    content: typeof input?.content === "string" ? input.content : "",
-    approved: input?.approved !== false,
-    feedback: typeof input?.feedback === "string" ? input.feedback : "",
-  };
-}
-
-async function callLocalSignedTool(runtime, toolName, rawArgs) {
-  const args = parseArgs(rawArgs);
-
-  switch (toolName) {
-    case "atel_order_create": {
-      const input = normalizeOrderCreateArgs(args);
-      if (!input.executorDid || !input.capabilityType || !input.description || !Number.isFinite(input.priceUsdc) || input.priceUsdc < 0) {
-        throw new Error("atel_order_create requires executorDid, capabilityType, description, and priceUsdc >= 0");
-      }
-      const signing = await loadSigningContext(runtime);
-      const taskRequest = {
-        version: 2,
-        orderId: null,
-        taskId: `task-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`,
-        requesterDid: signing.identity.did,
-        executorDid: input.executorDid,
-        capability: input.capabilityType,
-        description: input.description,
-        payload: { description: input.description },
-        timestamp: new Date().toISOString(),
-      };
-      const payload = {
-        executorDid: input.executorDid,
-        capabilityType: input.capabilityType,
-        priceAmount: input.priceUsdc,
-        priceCurrency: "USD",
-        pricingModel: "per_task",
-        description: input.description,
-        sourceLabel: "ATEL MCP",
-        version: 2,
-        taskRequest,
-        taskSignature: signTaskRequest(signing, taskRequest),
-      };
-      if (input.chain) {
-        payload.chain = input.chain;
-      }
-      return {
-        tool: toolName,
-        mode: "local-signed",
-        structuredContent: await signedPlatformRequestWithContext(signing, "POST", "/trade/v1/order", payload),
-        content: [],
-        isError: false,
-      };
-    }
-    case "atel_order_accept": {
-      const orderId = String(args?.orderId || "").trim();
-      if (!orderId) {
-        throw new Error("atel_order_accept requires orderId");
-      }
-      return {
-        tool: toolName,
-        mode: "local-signed",
-        structuredContent: await signedPlatformRequest(runtime, "POST", `/trade/v1/order/${encodeURIComponent(orderId)}/accept`, {}),
-        content: [],
-        isError: false,
-      };
-    }
-    case "atel_milestone_submit": {
-      const input = normalizeMilestoneArgs(args);
-      if (!input.orderId || !Number.isInteger(input.index) || input.index < 0 || input.index > 9 || !input.content) {
-        throw new Error("atel_milestone_submit requires orderId, index, and content");
-      }
-      return {
-        tool: toolName,
-        mode: "local-signed",
-        structuredContent: await signedPlatformRequest(
-          runtime,
-          "POST",
-          `/trade/v1/order/${encodeURIComponent(input.orderId)}/milestone/${input.index}/submit`,
-          { resultSummary: input.content },
-        ),
-        content: [],
-        isError: false,
-      };
-    }
-    case "atel_milestone_verify": {
-      const input = normalizeMilestoneArgs(args);
-      if (!input.orderId || !Number.isInteger(input.index) || input.index < 0 || input.index > 9) {
-        throw new Error("atel_milestone_verify requires orderId and index");
-      }
-      if (!input.approved && !input.feedback) {
-        throw new Error("atel_milestone_verify requires feedback when approved=false");
-      }
-      return {
-        tool: toolName,
-        mode: "local-signed",
-        structuredContent: await signedPlatformRequest(
-          runtime,
-          "POST",
-          `/trade/v1/order/${encodeURIComponent(input.orderId)}/milestone/${input.index}/verify`,
-          {
-            passed: input.approved,
-            rejectReason: input.approved ? "" : input.feedback,
-          },
-        ),
-        content: [],
-        isError: false,
-      };
-    }
-    case "atel_dispute_create": {
-      const orderId = String(args?.orderId || "").trim();
-      const reason = String(args?.reason || "").trim();
-      const description = typeof args?.description === "string" ? args.description.trim() : "";
-      if (!orderId || !reason) {
-        throw new Error("atel_dispute_create requires orderId and reason");
-      }
-      return {
-        tool: toolName,
-        mode: "local-signed",
-        structuredContent: await signedPlatformRequest(runtime, "POST", "/dispute/v1/open", {
-          orderId,
-          reason,
-          description,
-        }),
-        content: [],
-        isError: false,
-      };
-    }
-    default:
-      throw new Error(`Unsupported local-signed tool: ${toolName}`);
-  }
-}
+// ─── MCP request layer ────────────────────────────────────────────────
 
 async function sendMcpRequest(runtime, method, params = {}) {
   const config = readPluginConfig(runtime);
@@ -672,7 +383,7 @@ async function sendMcpRequest(runtime, method, params = {}) {
           capabilities: {},
           clientInfo: {
             name: "openclaw-atel-mcp",
-            version: "0.1.0",
+            version: "0.2.0",
           },
         },
       }),
@@ -736,23 +447,19 @@ async function listRemoteTools(runtime) {
 }
 
 function parseArgs(raw) {
-  if (raw == null) {
-    return {};
-  }
-  if (typeof raw === "object") {
-    return raw;
-  }
-  if (typeof raw === "string") {
-    return JSON.parse(raw);
-  }
+  if (raw == null) return {};
+  if (typeof raw === "object") return raw;
+  if (typeof raw === "string") return JSON.parse(raw);
   throw new Error("args must be a JSON object or JSON string");
 }
 
 async function callRemoteTool(runtime, toolName, args) {
-  if (LOCAL_SIGNED_TOOLS.has(toolName)) {
-    return callLocalSignedTool(runtime, toolName, args);
-  }
-
+  // No more LOCAL_SIGNED_TOOLS branch. Every tool — including the 5
+  // previously-bypassed ones (order_create, order_accept,
+  // milestone_submit, milestone_verify, dispute_create) — now goes
+  // through MCP server. That gives OpenClaw users access to MCP's
+  // anti-drift layer (schema enforcement, prerequisite checks, approval
+  // gate, actionable error hints) automatically.
   const result = await sendMcpRequest(runtime, "tools/call", {
     name: toolName,
     arguments: parseArgs(args),
@@ -808,6 +515,9 @@ export function createAtelMcpTool(runtime) {
         }
         return textResult({ error: `unsupported action: ${String(action)}` }, true);
       } catch (error) {
+        // Drop session on any error so the next call re-authenticates
+        // cleanly. Common case: bearer expired between calls; clearing
+        // the WeakMap entry triggers a fresh DID-Sig exchange on retry.
         sessionCache.delete(runtime);
         return textResult(
           {
