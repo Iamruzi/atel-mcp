@@ -1,5 +1,6 @@
 import { OrderAcceptInputSchema, OrderCompleteInputSchema, OrderConfirmInputSchema, OrderCreateInputSchema, OrderIdSchema } from '../contracts/schemas.js';
 import { acceptOrder, completeOrder, confirmOrder, createOrder, getOrder, getOrderTimeline, listMilestones, listOrders } from '../platform/adapters.js';
+import { getCapabilityRegistry, validateCapability } from '../platform/capability-cache.js';
 import { getRuntimeLinkSecret } from '../runtime-links/store.js';
 import { invokeLinkedRuntimeTool } from '../runtime-links/dispatch.js';
 import type { ToolExecutionContext } from '../server/context.js';
@@ -7,6 +8,7 @@ import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
 import { assertPrerequisite } from '../auth/guards.js';
 import { executorReady, sufficientBalance, walletReady, orderInStatus, callerIsRole } from '../auth/prerequisites.js';
+import { AtelMcpError } from '../contracts/errors.js';
 
 export async function atelOrderGet(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.read');
@@ -29,6 +31,23 @@ export async function atelOrderTimeline(ctx: ToolExecutionContext, input: unknow
 export async function atelOrderCreate(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.write');
   const parsed = OrderCreateInputSchema.parse(input);
+
+  // Validate capability against the platform's standard registry. Cuts
+  // the "host LLM invents capability string" drift case at the MCP layer
+  // before any platform round-trip. Aliases (e.g. "code" → "coding") are
+  // accepted and normalized so we forward the canonical name to platform.
+  const registry = await getCapabilityRegistry(ctx.config);
+  const capCheck = validateCapability(registry, parsed.capabilityType);
+  if (!capCheck.ok) {
+    throw new AtelMcpError(
+      'INVALID_INPUT',
+      `Unknown capabilityType: ${parsed.capabilityType}`,
+      { suggested: capCheck.suggestion, valid: registry.capabilities },
+      capCheck.hint,
+    );
+  }
+  // Forward the normalized canonical name to platform, not the raw input.
+  parsed.capabilityType = capCheck.normalized;
 
   // Reject before locking funds: executor exists & online & has the capability,
   // requester wallet on base is deployed, requester has price + 5% gas buffer.

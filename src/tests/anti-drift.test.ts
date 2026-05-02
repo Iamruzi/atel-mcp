@@ -294,7 +294,7 @@ test('anti-drift: order_create rejects offline executor with capability hint', a
     scopes: ['orders.write'],
     responder: (req) => {
       if (req.path.startsWith('/registry/v1/agent/')) {
-        return { online: false, lastSeen: '2026-04-30T00:00:00Z', capabilities: ['gift_card'] };
+        return { online: false, lastSeen: '2026-04-30T00:00:00Z', capabilities: ['coding'] };
       }
       return null;
     },
@@ -302,7 +302,7 @@ test('anti-drift: order_create rejects offline executor with capability hint', a
   await assert.rejects(
     () => atelOrderCreate(ctx, {
       executorDid,
-      capabilityType: 'gift_card',
+      capabilityType: 'coding',
       description: 'test',
       priceUsdc: 1,
     }),
@@ -323,7 +323,8 @@ test('anti-drift: order_create rejects executor without requested capability', a
     scopes: ['orders.write'],
     responder: (req) => {
       if (req.path.startsWith('/registry/v1/agent/')) {
-        return { online: true, capabilities: ['translate', 'summarize'] };
+        // Executor offers translation + writing; caller asks for coding.
+        return { online: true, capabilities: ['translation', 'writing'] };
       }
       return null;
     },
@@ -331,14 +332,14 @@ test('anti-drift: order_create rejects executor without requested capability', a
   await assert.rejects(
     () => atelOrderCreate(ctx, {
       executorDid,
-      capabilityType: 'gift_card',
+      capabilityType: 'coding',
       description: 'test',
       priceUsdc: 1,
     }),
     (err: unknown) => {
       assert.ok(err instanceof AtelMcpError);
       assert.equal(err.code, 'CAPABILITY_MISMATCH');
-      assert.match(err.hint ?? '', /translate.*summarize/);
+      assert.match(err.hint ?? '', /translation.*writing/);
       return true;
     },
   );
