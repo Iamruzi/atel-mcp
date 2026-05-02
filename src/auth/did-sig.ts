@@ -4,21 +4,27 @@
  * Why this exists: the OAuth challenge-poll flow assumes a browser at some
  * point in the loop. Agents running fully headless (CI, daemon, embedded
  * runtime) can't do that. DID-Sig lets such an agent sign a short-lived
- * payload with its ed25519 key and present it directly as the
- * Authorization header. The MCP server doesn't verify the signature locally
- * — it forwards to the platform's /auth/v1/verify, which has the
- * authoritative key registry and rate-limiting. On success, platform
- * returns a normal session envelope (same shape as Bearer introspection).
+ * envelope with its ed25519 key and present it directly as the
+ * Authorization header. MCP doesn't verify the signature locally — it
+ * forwards to platform's /auth/v1/did-sig (which reuses the same
+ * VerifySignedRequest infrastructure SDK already uses). Platform returns
+ * a JWT bearer token that flows through the standard introspection chain.
  *
- * Header format: `ATEL-DID-Sig <base64-encoded JSON payload>`
+ * Header format: `ATEL-DID-Sig <base64-encoded JSON envelope>`
  *
- * Payload shape (what the client builds before base64):
+ * Envelope (the JSON the client builds before base64-encoding):
  *   {
- *     "did":   "did:atel:ed25519:<base58 pubkey>",
- *     "ts":    <unix seconds>,
- *     "nonce": "<random 16-byte hex>",
- *     "sig":   "<base64 signature over (did|ts|nonce)>"
+ *     "did":       "did:atel:ed25519:<base58 pubkey>",
+ *     "payload":   { "nonce": "<random hex>" },   // any object; nonce strongly recommended
+ *     "timestamp": "2026-05-02T10:00:00.000Z",     // RFC3339, must be within ±5min of platform clock
+ *     "signature": "<base64 ed25519 signature over sortedJSON({did, payload, timestamp})>"
  *   }
+ *
+ * Note: this matches platform's existing SignedRequest envelope (same
+ * canonical-JSON signing rules SDK uses for /trade/v1/order signed POSTs).
+ * Reusing the format means `auth.SerializePayload` on platform validates
+ * the same bytes the SDK already signs — one less protocol surface to
+ * maintain.
  *
  * Bearer flow is unchanged. This scheme is purely additive.
  */
@@ -53,8 +59,21 @@ export function extractDidSigPayload(value?: string | null): string {
   return match[1].trim();
 }
 
-interface DidSigVerifyResponse extends PlatformSessionEnvelope {
-  bearerToken?: string;
+interface DidSigVerifyResponse {
+  /** Bearer JWT issued by platform — flows into ctx.session.bearerToken. */
+  token?: string;
+  did?: string;
+  environment?: PlatformSessionEnvelope['environment'];
+  scopes?: PlatformSessionEnvelope['scopes'];
+  sessionId?: string;
+  expiresAt?: number;
+}
+
+interface DidSigEnvelope {
+  did: string;
+  payload: unknown;
+  timestamp: string;
+  signature: string;
 }
 
 /**
@@ -71,25 +90,55 @@ export class DidSigIntrospectionClient implements AuthIntrospectionClient {
   constructor(private readonly config: AtelMcpConfig) {}
 
   /**
-   * NOTE: the `token` parameter here is the base64 DID-Sig payload, not a
-   * bearer token. We keep the AuthIntrospectionClient signature so this
-   * client slots into the same dispatch chain as PlatformAuthIntrospectionClient.
+   * NOTE: the `token` parameter here is the base64-encoded DID-Sig
+   * envelope (already stripped of the `ATEL-DID-Sig ` scheme prefix by
+   * `parseAuthorization` + the sentinel-routing in
+   * CompositeAuthIntrospectionClient). We keep the
+   * AuthIntrospectionClient signature so this client slots into the same
+   * dispatch chain as PlatformAuthIntrospectionClient.
    */
   async introspectBearerToken(token: string): Promise<RemoteBearerClaims> {
-    const response = await fetch(`${this.config.platformBaseUrl}/auth/v1/verify`, {
+    // Step 1: base64-decode → JSON parse → expect SignedRequest envelope.
+    let envelope: DidSigEnvelope;
+    try {
+      const decoded = Buffer.from(token, 'base64').toString('utf8');
+      const parsed = JSON.parse(decoded) as Partial<DidSigEnvelope>;
+      if (
+        typeof parsed.did !== 'string' ||
+        typeof parsed.signature !== 'string' ||
+        typeof parsed.timestamp !== 'string' ||
+        parsed.payload === undefined
+      ) {
+        throw new Error('envelope missing required fields (did, payload, timestamp, signature)');
+      }
+      envelope = parsed as DidSigEnvelope;
+    } catch (e) {
+      throw new AtelMcpError(
+        'UNAUTHORIZED',
+        `${DID_SIG_SCHEME} payload is not a valid base64-encoded SignedRequest envelope`,
+        { error: (e as Error).message },
+        `Build envelope as JSON: {did, payload:{nonce}, timestamp:RFC3339, signature:base64}, then base64-encode and put in \`Authorization: ${DID_SIG_SCHEME} <base64>\`.`,
+      );
+    }
+
+    // Step 2: forward verbatim to platform /auth/v1/did-sig (the new
+    // endpoint added in the platform-side T6.3 commit). Platform reuses
+    // VerifySignedRequest to validate ts window + DID parse + ed25519
+    // signature, then issues a JWT bearer.
+    const response = await fetch(`${this.config.platformBaseUrl}/auth/v1/did-sig`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ scheme: DID_SIG_SCHEME, payload: token }),
+      body: JSON.stringify(envelope),
     });
 
     const body = (await response.json().catch(() => null)) as DidSigVerifyResponse | null;
 
-    if (!response.ok || !body?.did) {
+    if (!response.ok || !body?.token || !body?.did) {
       throw new AtelMcpError(
         'UNAUTHORIZED',
         'DID-signed authorization could not be verified by the platform.',
         { status: response.status, payload: body },
-        'Common causes: clock skew (>5min), reused nonce, expired ts. Re-sign with a fresh ts/nonce and retry.',
+        'Common causes: clock skew (>5min from platform), bad signature, malformed DID. Re-sign with a fresh timestamp and retry.',
       );
     }
 
@@ -100,14 +149,12 @@ export class DidSigIntrospectionClient implements AuthIntrospectionClient {
       env: this.parseEnvironment(body.environment),
       scopes: this.parseScopes(body.scopes),
       sessionId: body.sessionId || `did-sig:${body.did}`,
-      issuedAt: body.issuedAt ?? now,
+      issuedAt: now,
       expiresAt: body.expiresAt ?? now + 3600,
-      clientId: body.clientId || 'atel-mcp-did-sig',
-      // Platform issues a short-lived bearer at verify time so subsequent
-      // platform calls (made by tool handlers) still authenticate normally.
-      // If the platform stops returning bearerToken, DID-Sig becomes useful
-      // only for tools that don't call platform — tighten via a check here.
-      bearerToken: body.bearerToken,
+      clientId: 'atel-mcp-did-sig',
+      // Platform's `token` field is the JWT we use as bearer for
+      // downstream platform calls (ctx.session.bearerToken).
+      bearerToken: body.token,
     } as RemoteBearerClaims & { bearerToken?: string };
   }
 
