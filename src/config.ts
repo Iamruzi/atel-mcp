@@ -34,14 +34,14 @@ export interface AtelMcpConfig {
   approvalLogPath?: string;
   approvalBypassTools?: string[];
   /**
-   * Whether the legacy runtime-links subsystem is wired into dispatch.
+   * Whether the runtime-links subsystem is wired into dispatch.
    *
-   * Phased退场: defaulting to true preserves back-compat for the OpenClaw
-   * plugin smoke tests that bind runtime DIDs and forward tool calls. Set
-   * to false in production once the plugin is split into its own package
-   * and stops needing the bind/unbind/dispatch surface.
+   * Default true because most ATEL users come in through OpenClaw / 龙虾,
+   * which relies on this subsystem to forward tool calls to a registered
+   * agent runtime (see src/runtime-links/dispatch.ts).
    *
-   * When false:
+   * Set to false ONLY for MCP hosts that do not serve 龙虾 users (e.g.
+   * an internal-tooling MCP). When false:
    *   - the 3 atel_runtime_link_* tools return NOT_IMPLEMENTED
    *   - dispatch skips getRuntimeLink (one fewer file read per call)
    *   - linked-runtime never wins backend selection (always platform-hosted)
@@ -128,8 +128,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     mcpInstance: env.ATEL_MCP_INSTANCE_ID?.trim() || env.HOSTNAME?.trim() || `${host}:${port}`,
     approvalLogPath: env.ATEL_MCP_APPROVAL_LOG_PATH?.trim() || undefined,
     approvalBypassTools: parseCsvList(env.ATEL_MCP_APPROVAL_BYPASS_TOOLS, []),
-    // Default true for back-compat. Set ATEL_MCP_RUNTIME_LINKS_ENABLED=false
-    // in production environments that have migrated off the OpenClaw plugin.
+    // Default true. ATEL_MCP_RUNTIME_LINKS_ENABLED=false only on MCP hosts
+    // that don't serve OpenClaw / 龙虾 users (a small minority).
     runtimeLinksEnabled: env.ATEL_MCP_RUNTIME_LINKS_ENABLED?.trim().toLowerCase() !== 'false',
     userEntryMode: 'mcp-primary',
     runtimeRole: 'sdk-runtime',

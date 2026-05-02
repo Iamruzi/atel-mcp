@@ -14,8 +14,9 @@ import { AtelMcpError } from '../contracts/errors.js';
 
 /**
  * Throw NOT_IMPLEMENTED if runtime-links subsystem is turned off in config.
- * The 3 runtime-link tools share this guard so flipping the config flag in
- * production gives a single, explainable error to every caller.
+ * The 3 runtime-link tools share this guard so deployments that opt out
+ * (e.g. an MCP host that does not serve OpenClaw / 龙虾 users) give a
+ * single, explainable error to every caller.
  */
 function assertRuntimeLinksEnabled(ctx: ToolExecutionContext): void {
   if (!ctx.config.runtimeLinksEnabled) {
@@ -23,7 +24,7 @@ function assertRuntimeLinksEnabled(ctx: ToolExecutionContext): void {
       'NOT_IMPLEMENTED',
       'Runtime-links subsystem is disabled on this MCP server',
       { configFlag: 'ATEL_MCP_RUNTIME_LINKS_ENABLED' },
-      'This deployment has phased out the legacy linked-runtime backend. Use platform-hosted dispatch (the default) or contact ops if you have an OpenClaw plugin runtime that still needs binding.',
+      'This MCP host is not configured to serve OpenClaw / 龙虾 runtime bindings. Contact ops if your DID needs runtime forwarding here, or use a host that has runtime-links enabled (the default).',
     );
   }
 }
@@ -58,7 +59,7 @@ export async function atelAgentSearch(ctx: ToolExecutionContext, input: unknown)
   return registrySearch(ctx, AgentSearchInputSchema.parse(input));
 }
 
-/** @deprecated runtime-links subsystem is on the退场 path. See config.runtimeLinksEnabled. */
+/** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */
 export async function atelRuntimeLinkStatus(ctx: ToolExecutionContext) {
   requireScope(ctx, 'identity.read');
   assertRuntimeLinksEnabled(ctx);
@@ -72,7 +73,7 @@ export async function atelRuntimeLinkStatus(ctx: ToolExecutionContext) {
   });
 }
 
-/** @deprecated runtime-links subsystem is on the退场 path. See config.runtimeLinksEnabled. */
+/** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */
 export async function atelRuntimeLinkBind(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'identity.read');
   assertRuntimeLinksEnabled(ctx);
@@ -96,7 +97,7 @@ export async function atelRuntimeLinkBind(ctx: ToolExecutionContext, input: unkn
   });
 }
 
-/** @deprecated runtime-links subsystem is on the退场 path. See config.runtimeLinksEnabled. */
+/** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */
 export async function atelRuntimeLinkUnbind(ctx: ToolExecutionContext) {
   requireScope(ctx, 'identity.read');
   assertRuntimeLinksEnabled(ctx);

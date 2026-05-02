@@ -45,7 +45,7 @@ test('runtime-links disabled: atel_runtime_link_status returns NOT_IMPLEMENTED w
     (err: unknown) => {
       assert.ok(err instanceof AtelMcpError);
       assert.equal(err.code, 'NOT_IMPLEMENTED');
-      assert.match(err.hint ?? '', /platform-hosted/);
+      assert.match(err.hint ?? '', /龙虾|runtime-links enabled/);
       const details = err.details as { configFlag?: string };
       assert.equal(details.configFlag, 'ATEL_MCP_RUNTIME_LINKS_ENABLED');
       return true;

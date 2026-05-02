@@ -1,8 +1,12 @@
 /**
- * @deprecated Runtime-link record store (hostedDid → runtimeDid + endpoint).
- * Used only by the legacy linked-runtime backend; gated by
- * config.runtimeLinksEnabled. See src/runtime-links/dispatch.ts for the
- * full退场 plan.
+ * Runtime-link record store (hostedDid → runtimeDid + endpoint).
+ *
+ * Used by the OpenClaw / 龙虾 platform to register where a hosted DID's
+ * agent runtime lives. Most ATEL users come in through 龙虾, so this
+ * store is on the hot path for production traffic.
+ *
+ * config.runtimeLinksEnabled is provided so deployments that DON'T serve
+ * 龙虾 users can disable the lookup, but the default is on.
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
