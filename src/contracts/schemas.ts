@@ -9,6 +9,14 @@ export const WhoamiOutputSchema = z.object({
   scopes: z.array(z.string())
 });
 
+// Onboarding (T3.1.1): mint a fresh identity in one call. Pre-auth tool —
+// caller has no DID yet. All fields optional; sourceLabel helps audit
+// trace which host triggered the registration.
+export const RegisterUserInputSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  sourceLabel: z.string().min(1).max(64).optional()
+});
+
 const RuntimeBackendSchema = z.enum(['platform-hosted', 'sdk-runtime', 'linked-runtime']);
 const UserModeSchema = z.enum(['mcp-only', 'runtime-only', 'mcp-plus-runtime']);
 const ExecutionClassSchema = z.enum(['platform-truth-read', 'platform-state-write', 'runtime-capable']);

@@ -1,6 +1,28 @@
 import type { ToolExecutionContext } from '../server/context.js';
 import { PLATFORM_ENDPOINTS } from './endpoints.js';
 
+/**
+ * Pre-auth: POST /auth/v1/register. The platform endpoint is unauthenticated
+ * (anyone can mint a new identity). We don't pass a bearer here because
+ * the caller doesn't have one yet — that's the whole point of register.
+ */
+export async function registerUser(
+  config: import('../config.js').AtelMcpConfig,
+  input: { name?: string; sourceLabel?: string },
+): Promise<unknown> {
+  const url = `${config.platformBaseUrl.replace(/\/+$/, '')}${PLATFORM_ENDPOINTS.auth.register}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!response.ok) {
+    throw new Error(`platform /auth/v1/register failed: ${response.status} ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
 export async function registrySearch(ctx: ToolExecutionContext, input: { query: string; capability?: string }) {
   return ctx.platform.request<unknown>({
     method: 'GET',

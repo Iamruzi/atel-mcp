@@ -1,12 +1,13 @@
 import {
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  RegisterUserInputSchema,
   RuntimeLinkBindInputSchema,
   RuntimeLinkMutationOutputSchema,
   RuntimeLinkStatusOutputSchema,
   WhoamiOutputSchema,
 } from '../contracts/schemas.js';
-import { registryRegister, registrySearch } from '../platform/adapters.js';
+import { registerUser, registryRegister, registrySearch } from '../platform/adapters.js';
 import { getRuntimeLink, removeRuntimeLink, upsertRuntimeLink } from '../runtime-links/store.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
@@ -47,6 +48,33 @@ export async function atelWhoami(ctx: ToolExecutionContext) {
     scopes: ctx.session.scopes,
   };
   return WhoamiOutputSchema.parse(output);
+}
+
+/**
+ * Pre-auth onboarding tool. Mints a fresh ATEL identity end-to-end so
+ * external hosts (Claude Desktop / Cursor / Codex / OpenClaw etc.) can
+ * give brand-new users access without a separate dashboard signup step.
+ *
+ * Returns:
+ *   - did: the new identity (did:atel:ed25519:<base58>)
+ *   - secretKey: ed25519 64-byte key (base64) — caller MUST persist
+ *     this securely (e.g. ~/.atel/identity.json). Server does not keep
+ *     a copy in this version (no KEK custody yet).
+ *   - publicKey: base58-encoded 32-byte public key
+ *   - token: 7-day JWT bearer for immediate use
+ *   - walletStatus: "pending" — caller polls atel_balance later until
+ *     wallet addresses appear (T3.1.2 will surface a dedicated tool)
+ *
+ * Bypass for the usual scope check happens in dispatch (PRE_AUTH_TOOLS).
+ */
+export async function atelRegisterUser(ctx: ToolExecutionContext, input: unknown) {
+  // No scope/auth check — dispatch already routed via the pre-auth path.
+  const parsed = RegisterUserInputSchema.parse(input ?? {});
+  const result = await registerUser(ctx.config, {
+    name: parsed.name,
+    sourceLabel: parsed.sourceLabel ?? ctx.meta.hostName ?? 'mcp-host',
+  });
+  return result;
 }
 
 export async function atelAgentRegister(ctx: ToolExecutionContext, input: unknown) {

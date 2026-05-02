@@ -11,6 +11,7 @@ import * as approval from './approval.js';
 
 export const TOOL_HANDLERS = {
   atel_whoami: identity.atelWhoami,
+  atel_register_user: identity.atelRegisterUser,
   atel_runtime_link_status: identity.atelRuntimeLinkStatus,
   atel_runtime_link_bind: identity.atelRuntimeLinkBind,
   atel_runtime_link_unbind: identity.atelRuntimeLinkUnbind,
