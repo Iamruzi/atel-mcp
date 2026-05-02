@@ -21,6 +21,16 @@ export interface AtelMcpConfig {
   allowCustomRemoteMcp: boolean;
   disableRegisterRateLimit?: boolean;
   auditLogPath?: string;
+  /**
+   * Whether to also POST each audit event to the platform's mcp_audit_log
+   * ingest endpoint. JSONL stays as the on-host primary regardless. Off by
+   * default until the platform endpoint is ready and field-aligned.
+   */
+  auditPlatformIngestEnabled: boolean;
+  /** Bearer token for the platform audit ingest endpoint (separate from user sessions). */
+  auditPlatformIngestToken?: string;
+  /** Identifier for this MCP instance — used by platform de-dup if MCP runs HA. */
+  mcpInstance: string;
   approvalLogPath?: string;
   approvalBypassTools?: string[];
   /**
@@ -113,6 +123,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     allowCustomRemoteMcp: env.ALLOW_CUSTOM_REMOTE_MCP === 'true',
     disableRegisterRateLimit: env.ATEL_MCP_DISABLE_REGISTER_RATE_LIMIT === 'true',
     auditLogPath: env.ATEL_MCP_AUDIT_LOG_PATH?.trim() || undefined,
+    auditPlatformIngestEnabled: env.ATEL_MCP_AUDIT_PLATFORM_INGEST?.trim().toLowerCase() === 'true',
+    auditPlatformIngestToken: env.ATEL_MCP_AUDIT_PLATFORM_INGEST_TOKEN?.trim() || undefined,
+    mcpInstance: env.ATEL_MCP_INSTANCE_ID?.trim() || env.HOSTNAME?.trim() || `${host}:${port}`,
     approvalLogPath: env.ATEL_MCP_APPROVAL_LOG_PATH?.trim() || undefined,
     approvalBypassTools: parseCsvList(env.ATEL_MCP_APPROVAL_BYPASS_TOOLS, []),
     // Default true for back-compat. Set ATEL_MCP_RUNTIME_LINKS_ENABLED=false

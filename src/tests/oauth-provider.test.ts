@@ -24,6 +24,8 @@ const baseConfig = {
   supportedUserModes: ['mcp-only', 'runtime-only', 'mcp-plus-runtime'],
   runtimeLinksPath: '.runtime/runtime-links.json',
   runtimeLinksEnabled: true,
+  auditPlatformIngestEnabled: false,
+  mcpInstance: 'test-instance',
 };
 
 test('PlatformChallengeOAuthProvider completes challenge-poll flow and exchanges auth code', async () => {
