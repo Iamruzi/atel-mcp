@@ -54,6 +54,7 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_agent_search: { all: ['identity.read'] },
   atel_balance: { all: ['wallet.read'] },
   atel_deposit_info: { all: ['wallet.read'] },
+  atel_wallet_status: { all: ['wallet.read'] },
   atel_contacts_list: { all: ['contacts.read'] },
   atel_inbox_list: { all: ['messages.read'] },
   atel_send_message: { all: ['messages.write'] },

@@ -81,6 +81,7 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_agent_search', { description: 'Search registered ATEL agents by capability or identity.', inputSchema: AgentSearchInputSchema.shape }, async (input) => asToolResult(await invoke('atel_agent_search', input)));
   server.registerTool('atel_balance', { description: 'Return current ATEL account balances.' }, async () => asToolResult(await invoke('atel_balance')));
   server.registerTool('atel_deposit_info', { description: 'Return supported deposit chains and addresses.' }, async () => asToolResult(await invoke('atel_deposit_info')));
+  server.registerTool('atel_wallet_status', { description: 'Poll wallet deployment progress after atel_register_user. Returns {status:pending|partial|ready, chainAddresses, hint}. Poll every 3-5s until status=ready before placing paid orders.' }, async () => asToolResult(await invoke('atel_wallet_status')));
   server.registerTool('atel_contacts_list', { description: 'List available ATEL contacts for the current identity.' }, async () => asToolResult(await invoke('atel_contacts_list')));
   server.registerTool('atel_inbox_list', { description: 'List recent ATEL messages for the current identity.' }, async () => asToolResult(await invoke('atel_inbox_list')));
   server.registerTool('atel_send_message', { description: 'Send a text message to another ATEL agent.', inputSchema: SendMessageInputSchema.shape }, async (input) => asToolResult(await invoke('atel_send_message', input)));

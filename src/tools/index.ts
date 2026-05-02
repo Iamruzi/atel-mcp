@@ -19,6 +19,7 @@ export const TOOL_HANDLERS = {
   atel_agent_search: identity.atelAgentSearch,
   atel_balance: wallet.atelBalance,
   atel_deposit_info: wallet.atelDepositInfo,
+  atel_wallet_status: wallet.atelWalletStatus,
   atel_contacts_list: messaging.atelContactsList,
   atel_inbox_list: messaging.atelInboxList,
   atel_send_message: messaging.atelSendMessage,
