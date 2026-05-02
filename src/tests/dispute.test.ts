@@ -193,11 +193,16 @@ test('dispute_resolve: requires dispute.resolve scope (not just disputes.write)'
   );
 });
 
-test('dispute_resolve: forwards verdict to platform /dispute/v1/{id}/resolve', async () => {
+test('dispute_resolve: forwards verdict to platform /dispute/v1/remote/{id}/resolve', async () => {
+  // Audit fix (2026-05-03): platform-side path is /dispute/v1/remote/{id}/resolve
+  // (RegisterRemoteRoutes), NOT /dispute/v1/{id}/resolve (which would be the
+  // admin-only mount that's not exposed). The remote endpoint requires
+  // ATEL_ARBITRATOR_DIDS allowlist on platform side and currently returns 501
+  // pending splitRatio→absolute-amount conversion plumbing.
   const ctx = makeCtx({
     scopes: ['dispute.resolve'],
     responder: (req) => {
-      if (req.path === '/dispute/v1/d-1/resolve') {
+      if (req.path === '/dispute/v1/remote/d-1/resolve') {
         return { disputeId: 'd-1', verdict: 'favor_executor', settled: true };
       }
       return null;

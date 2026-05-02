@@ -52,9 +52,11 @@ export const PLATFORM_ENDPOINTS = {
     create: '/dispute/v1/open',
     remoteCreate: '/dispute/v1/remote/open',
     detail: (disputeId: string) => `/dispute/v1/${encodeURIComponent(disputeId)}`,
-    // T3.6.2 — arbitrator action. Only the platform DID (or DIDs in the
-    // arbitrator allowlist) can call this; platform enforces.
-    resolve: (disputeId: string) => `/dispute/v1/${encodeURIComponent(disputeId)}/resolve`
+    // T3.6.2 — arbitrator action via MCP. Mounted under /remote/ (JWT
+    // auth path). Platform default fail-closed; requires caller DID in
+    // ATEL_ARBITRATOR_DIDS env. Returns 501 in v0.2 — splitRatio →
+    // absolute-amount conversion is fenced for ops review.
+    resolve: (disputeId: string) => `/dispute/v1/remote/${encodeURIComponent(disputeId)}/resolve`
   },
   a2b: {
     search: '/trade/v1/a2b/bitrefill/search',
