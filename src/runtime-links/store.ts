@@ -1,3 +1,9 @@
+/**
+ * @deprecated Runtime-link record store (hostedDid → runtimeDid + endpoint).
+ * Used only by the legacy linked-runtime backend; gated by
+ * config.runtimeLinksEnabled. See src/runtime-links/dispatch.ts for the
+ * full退场 plan.
+ */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { AtelMcpConfig } from '../config.js';

@@ -23,6 +23,7 @@ const baseConfig = {
   runtimeBackends: ['platform-hosted', 'sdk-runtime'],
   supportedUserModes: ['mcp-only', 'runtime-only', 'mcp-plus-runtime'],
   runtimeLinksPath: '.runtime/runtime-links.json',
+  runtimeLinksEnabled: true,
 };
 
 test('PlatformChallengeOAuthProvider completes challenge-poll flow and exchanges auth code', async () => {

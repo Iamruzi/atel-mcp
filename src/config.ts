@@ -23,6 +23,21 @@ export interface AtelMcpConfig {
   auditLogPath?: string;
   approvalLogPath?: string;
   approvalBypassTools?: string[];
+  /**
+   * Whether the legacy runtime-links subsystem is wired into dispatch.
+   *
+   * Phased退场: defaulting to true preserves back-compat for the OpenClaw
+   * plugin smoke tests that bind runtime DIDs and forward tool calls. Set
+   * to false in production once the plugin is split into its own package
+   * and stops needing the bind/unbind/dispatch surface.
+   *
+   * When false:
+   *   - the 3 atel_runtime_link_* tools return NOT_IMPLEMENTED
+   *   - dispatch skips getRuntimeLink (one fewer file read per call)
+   *   - linked-runtime never wins backend selection (always platform-hosted)
+   *   - invokeLinkedRuntimeTool is never reached
+   */
+  runtimeLinksEnabled: boolean;
   userEntryMode: AtelUserEntryMode;
   runtimeRole: AtelRuntimeRole;
   runtimeBackends: string[];
@@ -100,6 +115,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     auditLogPath: env.ATEL_MCP_AUDIT_LOG_PATH?.trim() || undefined,
     approvalLogPath: env.ATEL_MCP_APPROVAL_LOG_PATH?.trim() || undefined,
     approvalBypassTools: parseCsvList(env.ATEL_MCP_APPROVAL_BYPASS_TOOLS, []),
+    // Default true for back-compat. Set ATEL_MCP_RUNTIME_LINKS_ENABLED=false
+    // in production environments that have migrated off the OpenClaw plugin.
+    runtimeLinksEnabled: env.ATEL_MCP_RUNTIME_LINKS_ENABLED?.trim().toLowerCase() !== 'false',
     userEntryMode: 'mcp-primary',
     runtimeRole: 'sdk-runtime',
     runtimeBackends: parseCsvList(env.ATEL_MCP_RUNTIME_BACKENDS, ['platform-hosted', 'sdk-runtime', 'linked-runtime']),

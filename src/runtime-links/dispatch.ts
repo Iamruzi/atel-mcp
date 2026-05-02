@@ -1,3 +1,11 @@
+/**
+ * @deprecated Linked-runtime forwarding. Lives behind config.runtimeLinksEnabled
+ * and the executionPlan.selectedBackend === 'linked-runtime' branch in tool
+ * handlers. Once the OpenClaw plugin is split into its own package and stops
+ * needing the runtime_link bind/dispatch surface, both this file and
+ * src/runtime-links/store.ts can be deleted along with the corresponding
+ * branches in src/tools/{order,messaging,milestone}.ts.
+ */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AtelMcpError } from '../contracts/errors.js';

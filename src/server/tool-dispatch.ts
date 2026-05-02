@@ -42,7 +42,12 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
     deps: { audit: args.audit, auth: args.auth },
   });
 
-  const runtimeLink = await getRuntimeLink(args.config, ctx.session.did);
+  // Skip the runtime-link lookup entirely when the subsystem is disabled.
+  // Saves one JSON file read per dispatch and keeps the dispatch hot path
+  // free of legacy code once production flips the flag off.
+  const runtimeLink = args.config.runtimeLinksEnabled
+    ? await getRuntimeLink(args.config, ctx.session.did)
+    : null;
 
   ctx.executionPlan = buildExecutionRoutePlan({
     toolName: args.toolName,
