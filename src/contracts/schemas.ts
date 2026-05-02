@@ -283,3 +283,42 @@ export const WalletTransferInputSchema = z.object({
   amount: z.number().positive().max(10000),
   memo: z.string().max(200).optional()
 });
+
+// ─── Withdraw to external wallet (base / bsc / fast) ─────────────────────
+//
+// vs transfer:
+// - Withdraw assumes the recipient is OUTSIDE the ATEL ecosystem
+//   (cold storage, external CEX, personal wallet). transfer is for
+//   ATEL-internal P2P movement.
+// - Approval gate triggers on EVERY amount (no threshold) — withdraw is
+//   the highest-risk path because the funds leave ATEL custody for good.
+// - Anti-drift: handler warns if the address actually IS a known ATEL
+//   agent (probable host LLM mistake — meant transfer).
+// - Address format validated per chain (EVM 0x for base/bsc, raw 64-hex
+//   for fast — bech32 / DID forms NOT accepted; user should use
+//   atel_fast_transfer if they want DID-aware sending).
+
+const FastHexAddrOnlySchema = z.string().regex(/^[0-9a-fA-F]{64}$/, 'Fast address must be 64-char hex (no 0x prefix). Use atel_fast_transfer for DID/bech32 forms.');
+
+// Use a discriminated union so the address regex is enforced per-chain
+// — base/bsc require 0x..40, fast requires 64 hex.
+export const WalletWithdrawInputSchema = z.discriminatedUnion('chain', [
+  z.object({
+    chain: z.literal('base'),
+    address: EvmAddressSchema,
+    amount: z.number().positive().max(10000),
+    memo: z.string().max(200).optional()
+  }),
+  z.object({
+    chain: z.literal('bsc'),
+    address: EvmAddressSchema,
+    amount: z.number().positive().max(10000),
+    memo: z.string().max(200).optional()
+  }),
+  z.object({
+    chain: z.literal('fast'),
+    address: FastHexAddrOnlySchema,
+    amount: z.number().positive().max(10000),
+    memo: z.string().max(200).optional()
+  })
+]);

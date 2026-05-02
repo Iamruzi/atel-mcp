@@ -30,6 +30,7 @@ import {
   A2bQuoteInputSchema,
   FastTransferInputSchema,
   WalletTransferInputSchema,
+  WalletWithdrawInputSchema,
 } from '../contracts/schemas.js';
 import type { AuditSink } from './context.js';
 import type { AuthIntrospectionClient } from '../auth/introspection.js';
@@ -119,6 +120,7 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_fast_deposit_address', { description: 'Return your Fast Network deposit address (64-char hex = ed25519 pubkey). bech32 / 0x prefixes are NOT valid on Fast.' }, async () => asToolResult(await invoke('atel_fast_deposit_address')));
   server.registerTool('atel_fast_transfer', { description: 'Direct USDC P2P transfer on Fast Network (no escrow). Recipient accepts did:atel:ed25519:... DID OR 64-char hex pubkey. amount is USDC decimal. High-risk; requires wallet.transfer scope + per-action operator approval.', inputSchema: FastTransferInputSchema.shape }, async (input) => asToolResult(await invoke('atel_fast_transfer', input)));
   server.registerTool('atel_wallet_transfer', { description: 'EVM USDC transfer (chain=base|bsc). Address is 0x-prefixed 40-char hex; amount is USDC decimal. High-risk; requires wallet.transfer scope + per-action operator approval (out-of-band, not LLM-grantable).', inputSchema: WalletTransferInputSchema.shape }, async (input) => asToolResult(await invoke('atel_wallet_transfer', input)));
+  server.registerTool('atel_wallet_withdraw', { description: 'EXTERNAL withdrawal to a non-ATEL wallet (chain=base|bsc|fast). EVM addresses are 0x..40 hex, Fast addresses are 64-char raw hex. Highest risk: irreversible, leaves ATEL custody. Requires wallet.withdraw scope + ALWAYS triggers per-action operator approval (no threshold).' }, async (input) => asToolResult(await invoke('atel_wallet_withdraw', input)));
   server.registerTool('atel_approval_list', { description: 'List your pending and approved high-risk action approvals. Use to check whether your filed action is ready to retry.' }, async () => asToolResult(await invoke('atel_approval_list')));
   server.registerTool('atel_approval_get', { description: 'Get one approval record by id. Returns 404 if id belongs to another DID.', inputSchema: { id: z.string().min(1).startsWith('appr-') } }, async (input) => asToolResult(await invoke('atel_approval_get', input)));
 

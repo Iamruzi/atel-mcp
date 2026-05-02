@@ -54,6 +54,7 @@ export const TOOL_HANDLERS = {
   atel_fast_deposit_address: fast.atelFastDepositAddress,
   atel_fast_transfer: fast.atelFastTransfer,
   atel_wallet_transfer: wallet.atelWalletTransfer,
+  atel_wallet_withdraw: wallet.atelWalletWithdraw,
   atel_approval_list: approval.atelApprovalList,
   atel_approval_get: approval.atelApprovalGet,
 } as const;
