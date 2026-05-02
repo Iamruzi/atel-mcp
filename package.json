@@ -29,7 +29,11 @@
     "smoke:linked-runtime-order-accept": "node ./dist/dev/smoke-linked-runtime-order-accept.js",
     "smoke:linked-runtime-milestone-submit": "node ./dist/dev/smoke-linked-runtime-milestone-submit.js",
     "smoke:linked-runtime-milestone-verify": "node ./dist/dev/smoke-linked-runtime-milestone-verify.js",
-    "smoke:linked-runtime-milestone-reject": "node ./dist/dev/smoke-linked-runtime-milestone-reject.js"
+    "smoke:linked-runtime-milestone-reject": "node ./dist/dev/smoke-linked-runtime-milestone-reject.js",
+    "approval:list": "node ./dist/dev/approval-cli.js list",
+    "approval:approve": "node ./dist/dev/approval-cli.js approve",
+    "approval:deny": "node ./dist/dev/approval-cli.js deny",
+    "approval:get": "node ./dist/dev/approval-cli.js get"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

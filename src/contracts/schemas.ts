@@ -226,3 +226,24 @@ export const FastTransferInputSchema = z.object({
   // user_data is Option<32-byte hash>, not arbitrary text. See memo.)
   memo: z.string().max(200).optional()
 });
+
+// ─── EVM wallet transfer (base / bsc) ────────────────────────────────────
+//
+// Anti-drift design notes:
+// - chain is REQUIRED + restricted to base/bsc (Fast goes via fast_transfer
+//   which has different recipient format). Without forcing this distinction,
+//   LLM can pass a hex 64-char Fast address with chain=base — silent fail.
+// - address must be EVM 0x-prefixed 40-char hex. Schema rejects 64-char
+//   Fast hex format and bech32.
+// - amount is USDC decimal, capped at 10000.
+// - GATED behind approval gate (see src/approval/). High-risk scope alone
+//   is not enough — every action requires per-action operator approval.
+
+const EvmAddressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'EVM address must be 0x-prefixed 40-char hex');
+
+export const WalletTransferInputSchema = z.object({
+  chain: z.enum(['base', 'bsc']),
+  address: EvmAddressSchema,
+  amount: z.number().positive().max(10000),
+  memo: z.string().max(200).optional()
+});

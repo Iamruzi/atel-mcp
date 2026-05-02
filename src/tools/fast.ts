@@ -29,6 +29,7 @@ import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
 import { assertPrerequisite } from '../auth/guards.js';
 import { walletReady, sufficientBalance } from '../auth/prerequisites.js';
+import { requireApproval } from '../approval/gate.js';
 import { AtelMcpError } from '../contracts/errors.js';
 
 // ─── DID → Fast hex address conversion ───────────────────────────────────
@@ -206,6 +207,23 @@ export async function atelFastTransfer(ctx: ToolExecutionContext, input: unknown
 
   await assertPrerequisite(ctx.session, () => walletReady(ctx, 'fast'));
   await assertPrerequisite(ctx.session, () => sufficientBalance(ctx, 'fast', parsed.amount));
+
+  await requireApproval(
+    ctx,
+    {
+      action: 'fast.transfer',
+      toolName: 'atel_fast_transfer',
+      intentParams: {
+        recipient: recipientHex,
+        amount: parsed.amount,
+      },
+      summary: `Fast Network USDC transfer: ${parsed.amount} → ${recipientHex.slice(0, 10)}…${recipientHex.slice(-6)}${parsed.memo ? ` (memo: ${parsed.memo})` : ''}`,
+    },
+    {
+      approvalLogPath: ctx.config.approvalLogPath,
+      bypassTools: ctx.config.approvalBypassTools,
+    },
+  );
 
   const result = await walletWithdraw(ctx, {
     chain: 'fast',

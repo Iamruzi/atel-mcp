@@ -21,6 +21,8 @@ export interface AtelMcpConfig {
   allowCustomRemoteMcp: boolean;
   disableRegisterRateLimit?: boolean;
   auditLogPath?: string;
+  approvalLogPath?: string;
+  approvalBypassTools?: string[];
   userEntryMode: AtelUserEntryMode;
   runtimeRole: AtelRuntimeRole;
   runtimeBackends: string[];
@@ -96,6 +98,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     allowCustomRemoteMcp: env.ALLOW_CUSTOM_REMOTE_MCP === 'true',
     disableRegisterRateLimit: env.ATEL_MCP_DISABLE_REGISTER_RATE_LIMIT === 'true',
     auditLogPath: env.ATEL_MCP_AUDIT_LOG_PATH?.trim() || undefined,
+    approvalLogPath: env.ATEL_MCP_APPROVAL_LOG_PATH?.trim() || undefined,
+    approvalBypassTools: parseCsvList(env.ATEL_MCP_APPROVAL_BYPASS_TOOLS, []),
     userEntryMode: 'mcp-primary',
     runtimeRole: 'sdk-runtime',
     runtimeBackends: parseCsvList(env.ATEL_MCP_RUNTIME_BACKENDS, ['platform-hosted', 'sdk-runtime', 'linked-runtime']),

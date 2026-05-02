@@ -25,6 +25,7 @@ import {
   A2bLockFundsInputSchema,
   A2bExecutePurchaseInputSchema,
   FastTransferInputSchema,
+  WalletTransferInputSchema,
 } from '../contracts/schemas.js';
 import type { AuditSink } from './context.js';
 import type { AuthIntrospectionClient } from '../auth/introspection.js';
@@ -107,7 +108,10 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_a2b_execute_purchase', { description: 'Execute the Bitrefill purchase (createInvoice + pay). Run only after atel_a2b_lock_funds succeeded. Poll atel_a2b_purchase_get for redemption code once status=DELIVERED.', inputSchema: A2bExecutePurchaseInputSchema.shape }, async (input) => asToolResult(await invoke('atel_a2b_execute_purchase', input)));
   server.registerTool('atel_fast_balance', { description: 'Read your Fast Network USDC balance + Fast hex address. Returns null balance if platform balance response omits chainBalances.fast (known gap).' }, async () => asToolResult(await invoke('atel_fast_balance')));
   server.registerTool('atel_fast_deposit_address', { description: 'Return your Fast Network deposit address (64-char hex = ed25519 pubkey). bech32 / 0x prefixes are NOT valid on Fast.' }, async () => asToolResult(await invoke('atel_fast_deposit_address')));
-  server.registerTool('atel_fast_transfer', { description: 'Direct USDC P2P transfer on Fast Network (no escrow). Recipient accepts did:atel:ed25519:... DID OR 64-char hex pubkey. amount is USDC decimal. High-risk; requires wallet.transfer scope.', inputSchema: FastTransferInputSchema.shape }, async (input) => asToolResult(await invoke('atel_fast_transfer', input)));
+  server.registerTool('atel_fast_transfer', { description: 'Direct USDC P2P transfer on Fast Network (no escrow). Recipient accepts did:atel:ed25519:... DID OR 64-char hex pubkey. amount is USDC decimal. High-risk; requires wallet.transfer scope + per-action operator approval.', inputSchema: FastTransferInputSchema.shape }, async (input) => asToolResult(await invoke('atel_fast_transfer', input)));
+  server.registerTool('atel_wallet_transfer', { description: 'EVM USDC transfer (chain=base|bsc). Address is 0x-prefixed 40-char hex; amount is USDC decimal. High-risk; requires wallet.transfer scope + per-action operator approval (out-of-band, not LLM-grantable).', inputSchema: WalletTransferInputSchema.shape }, async (input) => asToolResult(await invoke('atel_wallet_transfer', input)));
+  server.registerTool('atel_approval_list', { description: 'List your pending and approved high-risk action approvals. Use to check whether your filed action is ready to retry.' }, async () => asToolResult(await invoke('atel_approval_list')));
+  server.registerTool('atel_approval_get', { description: 'Get one approval record by id. Returns 404 if id belongs to another DID.', inputSchema: { id: z.string().min(1).startsWith('appr-') } }, async (input) => asToolResult(await invoke('atel_approval_get', input)));
 
   return server;
 }
