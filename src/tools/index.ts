@@ -6,6 +6,7 @@ import * as milestone from './milestone.js';
 import * as dispute from './dispute.js';
 import * as audit from './audit.js';
 import * as a2b from './a2b.js';
+import * as fast from './fast.js';
 
 export const TOOL_HANDLERS = {
   atel_whoami: identity.atelWhoami,
@@ -43,6 +44,9 @@ export const TOOL_HANDLERS = {
   atel_a2b_intent_create: a2b.atelA2bIntentCreate,
   atel_a2b_lock_funds: a2b.atelA2bLockFunds,
   atel_a2b_execute_purchase: a2b.atelA2bExecutePurchase,
+  atel_fast_balance: fast.atelFastBalance,
+  atel_fast_deposit_address: fast.atelFastDepositAddress,
+  atel_fast_transfer: fast.atelFastTransfer,
 } as const;
 
 export type ToolName = keyof typeof TOOL_HANDLERS;

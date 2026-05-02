@@ -15,6 +15,11 @@ export const PLATFORM_ENDPOINTS = {
     balance: '/account/v1/balance',
     depositInfo: '/account/v1/deposit-info'
   },
+  wallet: {
+    // Existing platform withdraw endpoint — for Fast we pass chain='fast'
+    // and a 64-char hex recipient. See project memo `fast_p2p_transfer_done`.
+    withdraw: '/trade/v1/wallet/withdraw'
+  },
   contacts: {
     list: '/contacts/v1/list'
   },

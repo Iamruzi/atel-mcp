@@ -141,6 +141,24 @@ export async function getBalance(ctx: ToolExecutionContext) {
   });
 }
 
+/**
+ * Cross-chain withdraw / transfer. For chain='fast', recipient must be a
+ * 64-char hex pubkey (not bech32 — see fast_p2p_transfer_done memo).
+ * For chain='base'/'bsc', recipient is an EVM 0x-prefixed address. Amount
+ * is USDC decimal (e.g. 0.001 = 1000 micro-USDC).
+ */
+export async function walletWithdraw(
+  ctx: ToolExecutionContext,
+  input: { chain: 'fast' | 'base' | 'bsc'; address: string; amount: number },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.wallet.withdraw,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
 export async function getDepositInfo(ctx: ToolExecutionContext) {
   return ctx.platform.request<unknown>({
     method: 'GET',

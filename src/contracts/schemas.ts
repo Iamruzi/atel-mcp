@@ -200,3 +200,29 @@ export const A2bExecutePurchaseInputSchema = z.object({
   // already-deposited amount.
   amount: z.number().positive().max(10000)
 });
+
+// ─── Fast Network schemas ────────────────────────────────────────────────
+//
+// Anti-drift design notes:
+// - chain is NOT a parameter on fast_transfer (server hard-codes 'fast').
+//   Without this, the LLM might pass chain='base' but use a 64-char hex
+//   address — Fast format on EVM endpoint silently fails.
+// - recipient accepts EITHER a `did:atel:` DID (we base58-decode → hex) OR
+//   a raw 64-char hex string. bech32 NOT accepted (Fast P2P endpoint
+//   rejects it; see fast_p2p_transfer_done memo).
+// - amount is USDC decimal (0.001 = 1000 micro-USDC). Schema caps at 10000
+//   to block raw 6-decimal integers (e.g. `1000` would be $0.001 in
+//   decimal but LLM may have meant $1000 = 1000000000 raw).
+
+const FastHexAddressSchema = z.string().regex(/^[0-9a-fA-F]{64}$/, 'Fast address must be 64-char hex (no 0x prefix)');
+
+// Recipient: either ATEL DID (we resolve to hex) or raw 64-char hex.
+const FastRecipientSchema = z.union([DidSchema, FastHexAddressSchema]);
+
+export const FastTransferInputSchema = z.object({
+  recipient: FastRecipientSchema,
+  amount: z.number().positive().max(10000),
+  // Optional human-readable note for audit (does NOT go on-chain — Fast's
+  // user_data is Option<32-byte hash>, not arbitrary text. See memo.)
+  memo: z.string().max(200).optional()
+});

@@ -81,4 +81,7 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_a2b_intent_create: { all: ['a2b.write'] },
   atel_a2b_lock_funds: { all: ['a2b.write'] },
   atel_a2b_execute_purchase: { all: ['a2b.write'] },
+  atel_fast_balance: { all: ['wallet.read'] },
+  atel_fast_deposit_address: { all: ['wallet.read'] },
+  atel_fast_transfer: { all: ['wallet.transfer'] },
 };
