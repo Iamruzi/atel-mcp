@@ -91,7 +91,9 @@ export async function buildRequestContext(args: {
     // Default idempotency-key falls back to requestId when host doesn't
     // supply one. Means every MCP→platform POST is idempotent within the
     // same request scope without burdening the caller.
-    platform: new PlatformClient(args.config, meta.idempotencyKey ?? meta.requestId),
+    // Rate-limit key is the session DID — MUST be per-identity, not
+    // per-request, or the limit never fires (audit-fix 2026-05-03).
+    platform: new PlatformClient(args.config, meta.idempotencyKey ?? meta.requestId, session.did),
     executionPlan: {
       declaredUserMode: args.declaredUserMode,
       selectedBackend: 'platform-hosted',

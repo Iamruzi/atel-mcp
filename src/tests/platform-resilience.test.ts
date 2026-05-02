@@ -211,7 +211,10 @@ test('rate limit: throws actionable hint when limit hit during request()', async
     return new Response('{}', { status: 200 });
   }) as typeof fetch;
   try {
-    const client = new PlatformClient(baseConfig, 'drained-key');
+    // Audit-fix 2026-05-03: rate limit key is now a separate
+    // constructor arg from idempotency key. Pass 'drained-key' as the
+    // 3rd arg so the limiter check uses the same key we drained above.
+    const client = new PlatformClient(baseConfig, 'idem-key-distinct', 'drained-key');
     await assert.rejects(
       () => client.request<unknown>({
         method: 'GET',

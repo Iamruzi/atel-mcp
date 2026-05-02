@@ -108,17 +108,23 @@ export class PlatformClient {
    * `idempotency-key` header — so retries (host LLM resends, network
    * blips, dispatch loop) won't create duplicate orders / messages /
    * milestones at the platform.
+   *
+   * `defaultRateLimitKey` is wired from the session DID. Rate limit
+   * MUST be per-identity, not per-request — otherwise a misbehaving
+   * client gets fresh capacity on every loop iteration (no actual
+   * limit). Audit caught this 2026-05-03 pre-push.
    */
   constructor(
     private readonly config: AtelMcpConfig,
     private readonly defaultIdempotencyKey?: string,
+    private readonly defaultRateLimitKey?: string,
   ) {}
 
   async request<T>(req: PlatformRequest): Promise<T> {
-    // T8.5: per-DID rate-limit on the way in. Misbehaving host loops on
-    // a single tool → bucket drains → we throw UPSTREAM_ERROR with hint
-    // before hitting platform.
-    const limitKey = req.rateLimitKey ?? this.defaultIdempotencyKey ?? 'anonymous';
+    // T8.5: per-identity rate-limit on the way in. Defaults to session
+    // DID; falls back to a generic "anonymous" bucket if neither
+    // explicit key nor DID available (pre-auth path).
+    const limitKey = req.rateLimitKey ?? this.defaultRateLimitKey ?? 'anonymous';
     if (!platformLimiter.tryConsume(limitKey)) {
       throw new AtelMcpError(
         'UPSTREAM_ERROR',

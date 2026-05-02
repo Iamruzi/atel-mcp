@@ -176,7 +176,9 @@ async function dispatchPreAuthTool(args: DispatchToolInput): Promise<unknown> {
       expiresAt: 0,
     },
     config: args.config,
-    platform: new PlatformClient(args.config, args.idempotencyKey ?? requestId),
+    // Pre-auth has no DID → shared "pre-auth" rate-limit bucket.
+    // Prevents register/recover flood from N fresh request ids.
+    platform: new PlatformClient(args.config, args.idempotencyKey ?? requestId, 'pre-auth'),
     executionPlan: {
       selectedBackend: 'platform-hosted' as const,
       executionClass: 'platform-state-write' as const,
