@@ -9,6 +9,7 @@ export const PLATFORM_ENDPOINTS = {
   registry: {
     register: '/registry/v1/register',
     remoteRegister: '/registry/v1/remote/register',
+    remoteEndpoint: '/registry/v1/remote/endpoint', // T3.1.3 — advertise callback URL with reachability check
     search: '/registry/v1/search',
     agent: (did: string) => `/registry/v1/agent/${encodeURIComponent(did)}`
   },

@@ -41,6 +41,15 @@ export async function registryRegister(ctx: ToolExecutionContext, input: { name:
   });
 }
 
+export async function registryUpdateEndpoint(ctx: ToolExecutionContext, input: { endpoint: string; label?: string }) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.registry.remoteEndpoint,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
 // ─── A2B (Bitrefill gift card) adapters ──────────────────────────────────
 //
 // All a2b endpoints return raw platform JSON; MCP tool layer is responsible

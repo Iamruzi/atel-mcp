@@ -17,6 +17,13 @@ export const RegisterUserInputSchema = z.object({
   sourceLabel: z.string().min(1).max(64).optional()
 });
 
+// Onboarding (T3.1.3): advertise a callback endpoint for async events.
+// HTTPS required; platform verifies reachability before persisting.
+export const RegisterEndpointInputSchema = z.object({
+  endpoint: z.string().url().regex(/^https:\/\//, 'endpoint must be https://'),
+  label: z.string().min(1).max(64).optional()
+});
+
 const RuntimeBackendSchema = z.enum(['platform-hosted', 'sdk-runtime', 'linked-runtime']);
 const UserModeSchema = z.enum(['mcp-only', 'runtime-only', 'mcp-plus-runtime']);
 const ExecutionClassSchema = z.enum(['platform-truth-read', 'platform-state-write', 'runtime-capable']);

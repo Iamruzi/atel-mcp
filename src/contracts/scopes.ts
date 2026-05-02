@@ -52,6 +52,7 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_runtime_link_unbind: { all: ['identity.read'] },
   atel_agent_register: { all: ['identity.read'] },
   atel_agent_search: { all: ['identity.read'] },
+  atel_register_endpoint: { all: ['identity.read'] },
   atel_balance: { all: ['wallet.read'] },
   atel_deposit_info: { all: ['wallet.read'] },
   atel_wallet_status: { all: ['wallet.read'] },

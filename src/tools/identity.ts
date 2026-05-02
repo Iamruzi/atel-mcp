@@ -1,13 +1,14 @@
 import {
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  RegisterEndpointInputSchema,
   RegisterUserInputSchema,
   RuntimeLinkBindInputSchema,
   RuntimeLinkMutationOutputSchema,
   RuntimeLinkStatusOutputSchema,
   WhoamiOutputSchema,
 } from '../contracts/schemas.js';
-import { registerUser, registryRegister, registrySearch } from '../platform/adapters.js';
+import { registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
 import { getRuntimeLink, removeRuntimeLink, upsertRuntimeLink } from '../runtime-links/store.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
@@ -85,6 +86,25 @@ export async function atelAgentRegister(ctx: ToolExecutionContext, input: unknow
 export async function atelAgentSearch(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'identity.read');
   return registrySearch(ctx, AgentSearchInputSchema.parse(input));
+}
+
+/**
+ * Register a callback URL the platform can use to push async events
+ * (order_accepted / milestone callbacks / settlement notifications).
+ *
+ * Server-side guarantees (see atel-platform/internal/registry/endpoint_handler.go):
+ *   - HTTPS required (http:// rejected with hint)
+ *   - Reachability verified via HEAD request before persisting
+ *   - URL de-duped so re-registering the same URL doesn't bloat candidates
+ *
+ * Use case: SDK / OpenClaw / self-hosted agents need this. Pure MCP-only
+ * users (no local runtime) can skip it — they get events via polling
+ * (atel_inbox_list) instead.
+ */
+export async function atelRegisterEndpoint(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'identity.read');
+  const parsed = RegisterEndpointInputSchema.parse(input);
+  return registryUpdateEndpoint(ctx, parsed);
 }
 
 /** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */

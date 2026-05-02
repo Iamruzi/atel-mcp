@@ -6,6 +6,7 @@ import {
   AckInputSchema,
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  RegisterEndpointInputSchema,
   RegisterUserInputSchema,
   DisputeCreateInputSchema,
   AuditOrderQueryInputSchema,
@@ -79,6 +80,7 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_runtime_link_unbind', { description: 'Remove the runtime binding for the current hosted DID.' }, async () => asToolResult(await invoke('atel_runtime_link_unbind')));
   server.registerTool('atel_agent_register', { description: 'Register or update the current ATEL agent profile.', inputSchema: AgentRegisterInputSchema.shape }, async (input) => asToolResult(await invoke('atel_agent_register', input)));
   server.registerTool('atel_agent_search', { description: 'Search registered ATEL agents by capability or identity.', inputSchema: AgentSearchInputSchema.shape }, async (input) => asToolResult(await invoke('atel_agent_search', input)));
+  server.registerTool('atel_register_endpoint', { description: 'Advertise an HTTPS callback URL the platform can use to push async events. Server validates HTTPS + reachability (HEAD probe) before persisting. SDK / OpenClaw / self-hosted agents need this; pure MCP-only users can skip and poll atel_inbox_list instead.', inputSchema: RegisterEndpointInputSchema.shape }, async (input) => asToolResult(await invoke('atel_register_endpoint', input)));
   server.registerTool('atel_balance', { description: 'Return current ATEL account balances.' }, async () => asToolResult(await invoke('atel_balance')));
   server.registerTool('atel_deposit_info', { description: 'Return supported deposit chains and addresses.' }, async () => asToolResult(await invoke('atel_deposit_info')));
   server.registerTool('atel_wallet_status', { description: 'Poll wallet deployment progress after atel_register_user. Returns {status:pending|partial|ready, chainAddresses, hint}. Poll every 3-5s until status=ready before placing paid orders.' }, async () => asToolResult(await invoke('atel_wallet_status')));
