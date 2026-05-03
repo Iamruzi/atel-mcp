@@ -1,5 +1,6 @@
 import { OrderAcceptInputSchema, OrderCompleteInputSchema, OrderConfirmInputSchema, OrderCreateInputSchema, OrderIdSchema } from '../contracts/schemas.js';
-import { acceptOrder, completeOrder, confirmOrder, createOrder, getOrder, getOrderTimeline, listMilestones, listOrders } from '../platform/adapters.js';
+import { z } from 'zod/v4';
+import { acceptOrder, completeOrder, confirmOrder, createOrder, getOrder, getOrderTimeline, listMilestones, listOrders, milestonesFeedback } from '../platform/adapters.js';
 import { getCapabilityRegistry, validateCapability } from '../platform/capability-cache.js';
 import { getRuntimeLinkSecret } from '../runtime-links/store.js';
 import { invokeLinkedRuntimeTool } from '../runtime-links/dispatch.js';
@@ -95,6 +96,35 @@ export async function atelOrderCreate(ctx: ToolExecutionContext, input: unknown)
       backend,
       routeTarget,
     },
+  });
+  return result;
+}
+
+/**
+ * Confirm or reject the auto-generated milestone plan after both
+ * parties have engaged. After atel_order_accept locks escrow the order
+ * sits in milestone_review and BOTH requester + executor must call
+ * this with approved=true before M0 begins. Either side can also pass
+ * approved=false + feedback to request a revision of the plan.
+ */
+export const MilestonePlanFeedbackInputSchema = z.object({
+  orderId: z.string().min(1).startsWith('ord-'),
+  approved: z.boolean(),
+  feedback: z.string().max(2000).optional(),
+});
+
+export async function atelMilestonePlanFeedback(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'milestones.write');
+  const parsed = MilestonePlanFeedbackInputSchema.parse(input);
+  await assertPrerequisite(ctx.session, () => orderInStatus(ctx, parsed.orderId, ['milestone_review']));
+  const result = await milestonesFeedback(ctx, parsed);
+  await ctx.emitAudit({
+    ...childAuditBase(ctx),
+    type: 'tool.succeeded',
+    status: 'ok',
+    entityType: 'order',
+    entityId: parsed.orderId,
+    metadata: { action: 'milestone_plan_feedback', approved: parsed.approved },
   });
   return result;
 }

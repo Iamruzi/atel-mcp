@@ -356,6 +356,20 @@ export async function acceptOrder(ctx: ToolExecutionContext, orderId: string) {
   });
 }
 
+/**
+ * Confirm or reject the auto-generated milestone plan for an order.
+ * Both parties must approve before M0 execution starts. Either side
+ * can request revisions by passing approved=false + a feedback note.
+ */
+export async function milestonesFeedback(ctx: ToolExecutionContext, input: { orderId: string; approved: boolean; feedback?: string }) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.trade.remoteMilestonesFeedback(input.orderId),
+    body: { approved: input.approved, feedback: input.feedback ?? '' },
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
 export async function completeOrder(ctx: ToolExecutionContext, input: {
   orderId: string;
   taskId?: string;

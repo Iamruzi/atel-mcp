@@ -56,7 +56,12 @@ export const PLATFORM_ENDPOINTS = {
     milestoneSubmit: (orderId: string, index: number) => `/trade/v1/order/${encodeURIComponent(orderId)}/milestone/${index}/submit`,
     remoteMilestoneSubmit: (orderId: string, index: number) => `/trade/v1/remote/order/${encodeURIComponent(orderId)}/milestone/${index}/submit`,
     milestoneVerify: (orderId: string, index: number) => `/trade/v1/order/${encodeURIComponent(orderId)}/milestone/${index}/verify`,
-    remoteMilestoneVerify: (orderId: string, index: number) => `/trade/v1/remote/order/${encodeURIComponent(orderId)}/milestone/${index}/verify`
+    remoteMilestoneVerify: (orderId: string, index: number) => `/trade/v1/remote/order/${encodeURIComponent(orderId)}/milestone/${index}/verify`,
+    // Plan-confirmation gate. After atel_order_accept locks escrow, the
+    // order sits in milestone_review. Both requester AND executor must
+    // POST {approved:true} here before M0 starts. Either side can also
+    // POST {approved:false, feedback:"..."} to request revisions.
+    remoteMilestonesFeedback: (orderId: string) => `/trade/v1/remote/order/${encodeURIComponent(orderId)}/milestones/feedback`
   },
   dispute: {
     list: '/dispute/v1/list',

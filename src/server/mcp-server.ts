@@ -36,6 +36,7 @@ import {
 } from '../contracts/schemas.js';
 import type { AuditSink } from './context.js';
 import type { AuthIntrospectionClient } from '../auth/introspection.js';
+import * as order from '../tools/order.js';
 
 function asToolResult(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
@@ -137,6 +138,7 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_order_timeline', { description: 'Get the order activity timeline.', inputSchema: orderIdInput() }, async (input) => tryInvoke(invoke, 'atel_order_timeline', input));
   server.registerTool('atel_order_create', { description: 'Create an ATEL order.', inputSchema: OrderCreateInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_order_create', input));
   server.registerTool('atel_order_accept', { description: 'Accept an ATEL order.', inputSchema: OrderAcceptInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_order_accept', input));
+  server.registerTool('atel_milestone_plan_feedback', { description: 'Confirm or reject the auto-generated milestone plan after order_accept locks escrow. Both requester AND executor must call with approved=true before M0 starts; either can pass approved=false + feedback to request a revision. Status must be milestone_review.', inputSchema: order.MilestonePlanFeedbackInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_milestone_plan_feedback', input));
   server.registerTool('atel_order_complete', { description: 'Complete an ATEL order with proof and trace metadata.', inputSchema: OrderCompleteInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_order_complete', input));
   server.registerTool('atel_order_confirm', { description: 'Confirm and settle a completed ATEL order.', inputSchema: OrderConfirmInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_order_confirm', input));
   server.registerTool('atel_milestone_list', { description: 'List milestones for an order.', inputSchema: orderIdInput() }, async (input) => tryInvoke(invoke, 'atel_milestone_list', input));

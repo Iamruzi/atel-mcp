@@ -31,6 +31,7 @@ export const TOOL_HANDLERS = {
   atel_order_timeline: order.atelOrderTimeline,
   atel_order_create: order.atelOrderCreate,
   atel_order_accept: order.atelOrderAccept,
+  atel_milestone_plan_feedback: order.atelMilestonePlanFeedback,
   atel_order_complete: order.atelOrderComplete,
   atel_order_confirm: order.atelOrderConfirm,
   atel_milestone_list: order.atelMilestoneList,
