@@ -151,7 +151,11 @@ export async function orderInStatus(
   allowedStatuses: string[],
 ): Promise<PrerequisiteCheckResult> {
   try {
-    const order = (await getOrder(ctx, orderId)) as { status?: string } | null;
+    // Platform's GET /trade/v1/order/:id returns Go-style PascalCase
+    // ({Status, OrderID}) while POST /trade/v1/remote/order returns
+    // lowercase camelCase ({status, orderId}). Read both so the prereq
+    // works regardless of which path landed it.
+    const order = (await getOrder(ctx, orderId)) as { status?: string; Status?: string } | null;
     if (!order) {
       return {
         ok: false,
@@ -160,13 +164,14 @@ export async function orderInStatus(
         hint: 'Verify the orderId via atel_order_list.',
       };
     }
-    if (!allowedStatuses.includes(order.status ?? '')) {
+    const current = order.status ?? order.Status;
+    if (!allowedStatuses.includes(current ?? '')) {
       return {
         ok: false,
         code: 'PREREQUISITE_NOT_MET',
-        message: `Order is in status=${order.status}, requires one of [${allowedStatuses.join(',')}]`,
-        details: { orderId, current: order.status, allowed: allowedStatuses },
-        hint: `Use atel_order_timeline ${orderId} to see how it got to ${order.status}.`,
+        message: `Order is in status=${current}, requires one of [${allowedStatuses.join(',')}]`,
+        details: { orderId, current, allowed: allowedStatuses },
+        hint: `Use atel_order_timeline ${orderId} to see how it got to ${current}.`,
       };
     }
     return { ok: true };
@@ -190,7 +195,8 @@ export async function callerIsRole(
 ): Promise<PrerequisiteCheckResult> {
   try {
     const order = (await getOrder(ctx, orderId)) as
-      | { requesterDid?: string; executorDid?: string; requester_did?: string; executor_did?: string }
+      | { requesterDid?: string; executorDid?: string; requester_did?: string; executor_did?: string;
+          RequesterDID?: string; ExecutorDID?: string }
       | null;
     if (!order) {
       return {
@@ -199,7 +205,11 @@ export async function callerIsRole(
         message: `Order ${orderId} not found`,
       };
     }
-    const expected = role === 'requester' ? (order.requesterDid ?? order.requester_did) : (order.executorDid ?? order.executor_did);
+    // Triple-fallback: camelCase (POST remote), snake_case (some legacy
+    // paths), PascalCase (Go default JSON marshaling, GET /trade/v1/order/:id).
+    const expected = role === 'requester'
+      ? (order.requesterDid ?? order.requester_did ?? order.RequesterDID)
+      : (order.executorDid ?? order.executor_did ?? order.ExecutorDID);
     if (expected !== ctx.session.did) {
       return {
         ok: false,
