@@ -197,17 +197,17 @@ test('wallet_withdraw: with approval gate ON, ALWAYS triggers APPROVAL_PENDING (
   );
   // Critical: the platform withdraw call must NOT have happened.
   const paths = callsOf(ctx).map((c) => c.path);
-  assert.ok(!paths.includes('/trade/v1/wallet/withdraw'), 'withdraw must not be called before approval');
+  assert.ok(!paths.includes('/trade/v1/wallet/withdraw-jwt'), 'withdraw must not be called before approval');
 });
 
 // ─── Happy path (with bypass for direct platform call test) ─────────
 
-test('wallet_withdraw: with bypass enabled, forwards to platform /trade/v1/wallet/withdraw', async () => {
+test('wallet_withdraw: with bypass enabled, forwards to platform /trade/v1/wallet/withdraw-jwt', async () => {
   const ctx = makeCtx({
     // bypassTools includes atel_wallet_withdraw by default in makeCtx
     responder: (req) => {
       if (req.path === '/account/v1/balance') return { chainAddresses: { base: '0xaaa' }, chainBalances: { base: 100 } };
-      if (req.path === '/trade/v1/wallet/withdraw') return { txHash: '0xdeadbeef', status: 'submitted' };
+      if (req.path === '/trade/v1/wallet/withdraw-jwt') return { txHash: '0xdeadbeef', status: 'submitted' };
       return null;
     },
   });
@@ -219,7 +219,7 @@ test('wallet_withdraw: with bypass enabled, forwards to platform /trade/v1/walle
   });
   assert.deepEqual(result, { txHash: '0xdeadbeef', status: 'submitted' });
   // Verify the platform was hit with the right body.
-  const withdrawCall = callsOf(ctx).find((c) => c.path === '/trade/v1/wallet/withdraw');
+  const withdrawCall = callsOf(ctx).find((c) => c.path === '/trade/v1/wallet/withdraw-jwt');
   assert.ok(withdrawCall);
   assert.deepEqual(withdrawCall!.body, {
     chain: 'base',

@@ -19,9 +19,15 @@ export const PLATFORM_ENDPOINTS = {
     depositInfo: '/account/v1/deposit-info'
   },
   wallet: {
-    // Existing platform withdraw endpoint — for Fast we pass chain='fast'
-    // and a 64-char hex recipient. See project memo `fast_p2p_transfer_done`.
-    withdraw: '/trade/v1/wallet/withdraw'
+    // JWT-authenticated platform withdraw endpoint. Fast / EVM both route
+    // here; chain='fast' takes a 64-char hex recipient, EVM takes 0x..40
+    // hex. The /trade/v1/wallet/withdraw twin is DID-Sig only (used by
+    // SDK / 龙虾 runtime that holds the user's secretKey directly).
+    // MCP can't DID-Sig-sign because it doesn't see the secretKey, so
+    // it uses the -jwt alias which is bearer-authenticated.
+    // (Bug found 2026-05-03 during scenario 3 — Fast transfer was
+    // hitting the DID-Sig path with a JWT and returning 401.)
+    withdraw: '/trade/v1/wallet/withdraw-jwt'
   },
   contacts: {
     list: '/contacts/v1/list'
@@ -59,6 +65,22 @@ export const PLATFORM_ENDPOINTS = {
     resolve: (disputeId: string) => `/dispute/v1/remote/${encodeURIComponent(disputeId)}/resolve`
   },
   a2b: {
+    // KNOWN GAP (audit-found 2026-05-03): these paths are DID-Sig
+    // protected on platform; the MCP server holds a JWT not a DID
+    // signature, so calling them returns 401 "invalid timestamp".
+    //
+    // Platform exposes a JWT mount at /trade/v1/remote/a2b/* via
+    // RegisterRemoteWriteRoutes covering: product-search, quote-preview,
+    // order (= intent), order/:id/pay, order/:id/redemption, order/:id (GET).
+    // It DOES NOT yet expose JWT versions of: wallet/deposit (lock_funds
+    // backing call) and bitrefill/createInvoice (execute_purchase
+    // backing call). Until platform adds those:
+    //   - search/intent/pay/list/detail need MCP-adapter path migration
+    //     to /trade/v1/remote/a2b/*
+    //   - lock_funds + execute_purchase remain BLOCKED via MCP path
+    //
+    // Below paths are kept as-is for reference; full A2B-via-MCP is
+    // tracked as a follow-up after platform adds 2 missing JWT handlers.
     search: '/trade/v1/a2b/bitrefill/search',
     intent: '/trade/v1/a2b/intent',
     deposit: '/trade/v1/a2b/wallet/deposit',
@@ -68,9 +90,9 @@ export const PLATFORM_ENDPOINTS = {
     list: '/trade/v1/a2b/list',
     detail: (intentId: string) => `/trade/v1/a2b/detail/${encodeURIComponent(intentId)}`,
     redemptionReveal: (intentId: string) => `/trade/v1/a2b/redemption-reveal/${encodeURIComponent(intentId)}`,
-    // T3.4.1 — server-side amount calculation, hits Bitrefill for live
-    // pricing. Lives under /remote/ JWT path because the endpoint takes
-    // the user's DID from the bearer.
+    // T3.4.1 — server-side amount calculation. This one DOES use the
+    // /remote/ JWT path because it was added recently (T3.4.1) targeted
+    // at MCP from day one.
     quote: '/trade/v1/remote/a2b/quote-preview'
   }
 } as const;
