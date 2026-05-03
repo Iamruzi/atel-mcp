@@ -33,7 +33,12 @@ export const PLATFORM_ENDPOINTS = {
     list: '/contacts/v1/list'
   },
   relay: {
-    send: '/relay/v1/send',
+    // Platform exposes /relay/v1/send (DID-Sig) and /relay/v1/send-jwt
+    // (JWT bearer). MCP holds a JWT, so use the -jwt alias. The DID-Sig
+    // twin would 401 with "invalid timestamp" on every send.
+    // (Same pattern as /trade/v1/wallet/withdraw-jwt — discovered
+    // 2026-05-03 during real-runtime e2e on 龙虾1 sending a message.)
+    send: '/relay/v1/send-jwt',
     poll: '/relay/v1/poll',
     inbox: '/relay/v1/inbox',
     ack: '/relay/v1/ack'
