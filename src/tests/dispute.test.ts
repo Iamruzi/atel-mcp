@@ -194,16 +194,22 @@ test('dispute_resolve: requires dispute.resolve scope (not just disputes.write)'
 });
 
 test('dispute_resolve: forwards verdict to platform /dispute/v1/remote/{id}/resolve', async () => {
-  // Audit fix (2026-05-03): platform-side path is /dispute/v1/remote/{id}/resolve
-  // (RegisterRemoteRoutes), NOT /dispute/v1/{id}/resolve (which would be the
-  // admin-only mount that's not exposed). The remote endpoint requires
-  // ATEL_ARBITRATOR_DIDS allowlist on platform side and currently returns 501
-  // pending splitRatio→absolute-amount conversion plumbing.
+  // Platform path is /dispute/v1/remote/{id}/resolve (RegisterRemoteRoutes).
+  // The remote endpoint requires ATEL_ARBITRATOR_DIDS allowlist on platform
+  // side and now returns the resolved snapshot (refundAmount + executorPayout
+  // derived from splitRatio + price loaded server-side).
   const ctx = makeCtx({
     scopes: ['dispute.resolve'],
     responder: (req) => {
       if (req.path === '/dispute/v1/remote/d-1/resolve') {
-        return { disputeId: 'd-1', verdict: 'favor_executor', settled: true };
+        return {
+          disputeId: 'd-1',
+          resolution: 'executor_wins',
+          refundAmount: 0,
+          executorPayout: 100,
+          priceAmount: 100,
+          status: 'resolved',
+        };
       }
       return null;
     },
@@ -212,6 +218,8 @@ test('dispute_resolve: forwards verdict to platform /dispute/v1/remote/{id}/reso
     disputeId: 'd-1',
     verdict: 'favor_executor',
     notes: 'work was acceptable; reject feedback was unwarranted per evidence',
-  }) as { settled: boolean };
-  assert.equal(result.settled, true);
+  }) as { resolution: string; refundAmount: number; executorPayout: number };
+  assert.equal(result.resolution, 'executor_wins');
+  assert.equal(result.refundAmount, 0);
+  assert.equal(result.executorPayout, 100);
 });
