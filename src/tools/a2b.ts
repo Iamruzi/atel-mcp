@@ -25,6 +25,7 @@ import {
   A2bIntentCreateInputSchema,
   A2bLockFundsInputSchema,
   A2bExecutePurchaseInputSchema,
+  A2bPurchaseInputSchema,
   A2bQuoteInputSchema,
 } from '../contracts/schemas.js';
 import {
@@ -36,6 +37,7 @@ import {
   a2bDeposit,
   a2bCreateInvoice,
   a2bPay,
+  a2bPurchase,
   a2bQuote,
   getBalance,
 } from '../platform/adapters.js';
@@ -93,6 +95,22 @@ export async function atelA2bQuote(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'a2b.read');
   const parsed = A2bQuoteInputSchema.parse(input);
   return a2bQuote(ctx, parsed);
+}
+
+/**
+ * One-shot A2B purchase. Replaces the legacy 3-step
+ * intent_create → lock_funds → execute_purchase chain for MCP callers.
+ * Platform's /trade/v1/remote/a2b/order does it all server-side.
+ *
+ * Required: a2b.write scope. Real funds move (USDC on chain=base).
+ * Caller MUST have run atel_a2b_quote first to learn quotedPriceUsdc;
+ * pass it (or higher) as maxAmountUsdc here so platform can refuse if
+ * Bitrefill repushes a higher quote at order time.
+ */
+export async function atelA2bPurchase(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'a2b.write');
+  const parsed = A2bPurchaseInputSchema.parse(input);
+  return a2bPurchase(ctx, parsed);
 }
 
 export async function atelA2bPurchaseGet(ctx: ToolExecutionContext, input: unknown) {

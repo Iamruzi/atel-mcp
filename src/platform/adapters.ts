@@ -117,6 +117,28 @@ export async function a2bRedemptionReveal(ctx: ToolExecutionContext, intentId: s
 }
 
 /**
+ * T3.4.x — One-shot A2B purchase. POSTs to the consolidated
+ * /trade/v1/remote/a2b/order endpoint which runs the full pipeline
+ * (intent → deposit → invoice → pay → optional redemption-reveal) on
+ * the platform side under a single JWT-authenticated call.
+ *
+ * Replaces the legacy 3-step intent_create / lock_funds / execute_purchase
+ * sequence for MCP callers — those tools were modeled after the
+ * stepwise DID-Sig flow and don't fit the JWT/remote design.
+ */
+export async function a2bPurchase(
+  ctx: ToolExecutionContext,
+  input: { query: string; productId: string; value: number; country?: string; maxAmountUsdc: number; autoReveal?: boolean },
+) {
+  return ctx.platform.request<unknown>({
+    method: 'POST',
+    path: PLATFORM_ENDPOINTS.a2b.purchase,
+    body: input,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
+/**
  * T3.4.1 — Server-side quote calculation. Returns the live USDC price
  * Bitrefill would charge for the requested (productId, value) tuple.
  * The `quotedPriceUsdc` field is the source of truth for the downstream
@@ -176,8 +198,8 @@ export async function a2bPay(
 ) {
   return ctx.platform.request<unknown>({
     method: 'POST',
-    path: PLATFORM_ENDPOINTS.a2b.pay,
-    body: input,
+    path: PLATFORM_ENDPOINTS.a2b.pay(input.intentId),
+    body: { amount: input.amount },
     bearerToken: ctx.session.bearerToken,
   });
 }

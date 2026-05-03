@@ -226,6 +226,28 @@ export const A2bIntentCreateInputSchema = z.object({
   country: z.string().min(2).max(40).optional()
 });
 
+// T3.4.x — atel_a2b_purchase consolidates the legacy stepwise flow
+// (intent_create → lock_funds → execute_purchase) into a single platform
+// call against /trade/v1/remote/a2b/order. Platform creates the intent,
+// deposits user funds into the A2B contract, asks Bitrefill for an
+// invoice, pays it, and (optionally) reveals the redemption code in one
+// shot. Host LLM only needs to know:
+//   1. the productId (from atel_a2b_search)
+//   2. the face value (e.g. 50 ZAR for cheapest Boxer SA)
+//   3. a USDC ceiling (maxAmountUsdc) — server refuses if Bitrefill quotes
+//      higher
+// Returns the intent id, the actual paid USDC, and the delivery status
+// ('delivered' / 'pending' / 'paid'). If autoReveal=false, caller must
+// poll atel_a2b_purchase_get for the redemption code.
+export const A2bPurchaseInputSchema = z.object({
+  query: z.string().min(1).max(200),
+  productId: z.string().min(1).max(200),
+  value: z.number().positive().max(10000),
+  country: z.string().min(2).max(40).optional(),
+  maxAmountUsdc: z.number().positive().max(10000),
+  autoReveal: z.boolean().optional(),
+});
+
 // T3.4.1 — server-side quote calculation. Anti-drift principle #1:
 // host doesn't compute amount, doesn't guess prices. It picks (productId,
 // value) and the platform calls Bitrefill to get the actual USDC charge.

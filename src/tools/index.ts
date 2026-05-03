@@ -48,6 +48,7 @@ export const TOOL_HANDLERS = {
   atel_a2b_purchase_list: a2b.atelA2bPurchaseList,
   atel_a2b_purchase_get: a2b.atelA2bPurchaseGet,
   atel_a2b_quote: a2b.atelA2bQuote,
+  atel_a2b_purchase: a2b.atelA2bPurchase,
   atel_a2b_intent_create: a2b.atelA2bIntentCreate,
   atel_a2b_lock_funds: a2b.atelA2bLockFunds,
   atel_a2b_execute_purchase: a2b.atelA2bExecutePurchase,

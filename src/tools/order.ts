@@ -103,10 +103,13 @@ export async function atelOrderAccept(ctx: ToolExecutionContext, input: unknown)
   requireScope(ctx, 'orders.write');
   const orderId = OrderAcceptInputSchema.parse(input).orderId;
 
-  // Server-side state-machine enforcement: order must be pending + caller
-  // must be the assigned executor. Stops host LLM from "accepting" an order
-  // that's already executing or that someone else owns.
-  await assertPrerequisite(ctx.session, () => orderInStatus(ctx, orderId, ['pending', 'pending_acceptance']));
+  // Server-side state-machine enforcement: order must be in a pre-acceptance
+  // state + caller must be the assigned executor. Stops host LLM from
+  // "accepting" an order that's already executing or that someone else owns.
+  // Platform sets status='created' at INSERT (see internal/trade/handler.go
+  // INSERT INTO orders ... 'created' ...); we accept the equivalent older
+  // names 'pending' / 'pending_acceptance' too for forward-compat.
+  await assertPrerequisite(ctx.session, () => orderInStatus(ctx, orderId, ['created', 'pending', 'pending_acceptance']));
   await assertPrerequisite(ctx.session, () => callerIsRole(ctx, orderId, 'executor'));
 
   let result: unknown;

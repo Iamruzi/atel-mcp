@@ -111,7 +111,7 @@ test('anti-drift: a2b_purchase_get does NOT reveal redemption when status=PENDIN
   const ctx = makeCtx({
     scopes: ['a2b.read'],
     responder: (req) => {
-      if (req.path.includes('/redemption-reveal/')) {
+      if (req.path.includes('/redemption')) {
         // If this endpoint is hit, the gate is broken.
         throw new Error('Redemption reveal MUST NOT be called when status=PENDING');
       }
@@ -126,7 +126,7 @@ test('anti-drift: a2b_purchase_get reveals redemption only when status=DELIVERED
   const ctx = makeCtx({
     scopes: ['a2b.read'],
     responder: (req) => {
-      if (req.path.includes('/redemption-reveal/')) return { code: 'REDEEM-OK' };
+      if (req.path.includes('/redemption')) return { code: 'REDEEM-OK' };
       return { intent_id: 'intent_123', status: 'DELIVERED' };
     },
   });

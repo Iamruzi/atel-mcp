@@ -65,34 +65,29 @@ export const PLATFORM_ENDPOINTS = {
     resolve: (disputeId: string) => `/dispute/v1/remote/${encodeURIComponent(disputeId)}/resolve`
   },
   a2b: {
-    // KNOWN GAP (audit-found 2026-05-03): these paths are DID-Sig
-    // protected on platform; the MCP server holds a JWT not a DID
-    // signature, so calling them returns 401 "invalid timestamp".
+    // All A2B routes use the JWT-authenticated /trade/v1/remote/a2b/*
+    // mount (RegisterRemoteWriteRoutes). The legacy /trade/v1/a2b/*
+    // endpoints are DID-Sig only and 401 against an MCP-server JWT.
     //
-    // Platform exposes a JWT mount at /trade/v1/remote/a2b/* via
-    // RegisterRemoteWriteRoutes covering: product-search, quote-preview,
-    // order (= intent), order/:id/pay, order/:id/redemption, order/:id (GET).
-    // It DOES NOT yet expose JWT versions of: wallet/deposit (lock_funds
-    // backing call) and bitrefill/createInvoice (execute_purchase
-    // backing call). Until platform adds those:
-    //   - search/intent/pay/list/detail need MCP-adapter path migration
-    //     to /trade/v1/remote/a2b/*
-    //   - lock_funds + execute_purchase remain BLOCKED via MCP path
-    //
-    // Below paths are kept as-is for reference; full A2B-via-MCP is
-    // tracked as a follow-up after platform adds 2 missing JWT handlers.
-    search: '/trade/v1/a2b/bitrefill/search',
-    intent: '/trade/v1/a2b/intent',
-    deposit: '/trade/v1/a2b/wallet/deposit',
-    createInvoice: '/trade/v1/a2b/bitrefill/createInvoice',
-    pay: '/trade/v1/a2b/wallet/pay',
-    redemption: '/trade/v1/a2b/bitrefill/redemption',
-    list: '/trade/v1/a2b/list',
-    detail: (intentId: string) => `/trade/v1/a2b/detail/${encodeURIComponent(intentId)}`,
-    redemptionReveal: (intentId: string) => `/trade/v1/a2b/redemption-reveal/${encodeURIComponent(intentId)}`,
-    // T3.4.1 — server-side amount calculation. This one DOES use the
-    // /remote/ JWT path because it was added recently (T3.4.1) targeted
-    // at MCP from day one.
-    quote: '/trade/v1/remote/a2b/quote-preview'
+    // Platform's remote A2B is more consolidated than the legacy
+    // stepwise DID-Sig flow: the `/trade/v1/remote/a2b/order` endpoint
+    // runs the full quote → intent → deposit → invoice → pay →
+    // (optional) redemption pipeline in one call. The legacy multi-step
+    // MCP tools (intent_create / lock_funds / execute_purchase) all
+    // funnel through this single platform call now.
+    search: '/trade/v1/remote/a2b/product-search',
+    quote: '/trade/v1/remote/a2b/quote-preview',
+    purchase: '/trade/v1/remote/a2b/order',
+    pay: (intentId: string) => `/trade/v1/remote/a2b/order/${encodeURIComponent(intentId)}/pay`,
+    redemption: (intentId: string) => `/trade/v1/remote/a2b/order/${encodeURIComponent(intentId)}/redemption`,
+    list: '/trade/v1/remote/a2b/orders',
+    detail: (intentId: string) => `/trade/v1/remote/a2b/order/${encodeURIComponent(intentId)}`,
+    redemptionReveal: (intentId: string) => `/trade/v1/remote/a2b/order/${encodeURIComponent(intentId)}/redemption`,
+    // Legacy multi-step MCP tools — same backing call, different
+    // semantics in the adapter (see a2bIntent / a2bDeposit /
+    // a2bCreateInvoice in adapters.ts).
+    intent: '/trade/v1/remote/a2b/order',
+    deposit: '/trade/v1/remote/a2b/order',
+    createInvoice: '/trade/v1/remote/a2b/order'
   }
 } as const;
