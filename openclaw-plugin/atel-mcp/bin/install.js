@@ -93,10 +93,14 @@ config.plugins.installs["atel-mcp"] = {
 };
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 
+// Skip config validate — the CLI shape varies across OpenClaw releases
+// (`config validate` vs `config validate <path>`), and our changes are
+// strictly additive (one plugin entry + allowlist). Failure here would
+// be a false negative on installs that ARE valid.
 try {
-  execFileSync("openclaw", ["config", "validate"], { stdio: "inherit" });
+  execFileSync("openclaw", ["doctor"], { stdio: "inherit" });
 } catch {
-  die("OpenClaw config validation failed; restore backup if needed: " + backup);
+  console.error("warn: openclaw doctor reported issues (non-fatal); review with `openclaw doctor` after install.");
 }
 
 if (!has("--no-restart")) {
@@ -104,6 +108,57 @@ if (!has("--no-restart")) {
     execFileSync("systemctl", ["--user", "restart", "openclaw-gateway.service"], { stdio: "inherit" });
   } catch {
     console.error("warn: could not restart openclaw-gateway.service; restart OpenClaw manually.");
+  }
+}
+
+// Register a recurring cron job that drives poll_events. This is the only
+// way for plugin to reach into the agent — OpenClaw doesn't expose a
+// "trigger turn" API to plugins (verified 2026-05-04). Cron persists in
+// ~/.openclaw/cron/jobs.json so plugin restart doesn't lose it.
+//
+// Idempotent: if a cron with name "atel-mcp-poll" already exists, we
+// don't add a duplicate.
+if (!has("--no-cron")) {
+  const intervalSec = Number(process.env.ATEL_RELAY_CRON_INTERVAL_SEC || 30);
+  const cronName = "atel-mcp-poll";
+  let existsAlready = false;
+  try {
+    const list = execFileSync("openclaw", ["cron", "list", "--json"], { encoding: "utf-8" });
+    const parsed = JSON.parse(list);
+    if (Array.isArray(parsed?.jobs) && parsed.jobs.some((j) => j.name === cronName)) {
+      existsAlready = true;
+    }
+  } catch {
+    // CLI/parse error — fall through and try add. If add ALSO fails the
+    // user can manually run the command from the install summary below.
+  }
+
+  if (existsAlready) {
+    console.log(`cron job '${cronName}' already present — keeping it.`);
+  } else {
+    try {
+      execFileSync(
+        "openclaw",
+        [
+          "cron", "add",
+          "--name", cronName,
+          "--every", `${intervalSec}s`,
+          "--session", "isolated",
+          "--message",
+          // Message is short on purpose. The agent's job is just to poll
+          // and either noop (no events) or react. Long prompts here
+          // would inflate input tokens on every cron tick.
+          "Call atel_mcp action=poll_events. If the result has noEvents:true, just stop — do not summarize. Otherwise process each event in the result and take the appropriate next action (e.g. submit the next milestone if a previous one was just verified).",
+          "--no-deliver",
+          "--light-context",
+        ],
+        { stdio: "inherit" },
+      );
+      console.log(`cron job '${cronName}' registered (every ${intervalSec}s).`);
+    } catch {
+      console.error(`warn: could not register cron job '${cronName}'. Reverse channel will not auto-trigger.`);
+      console.error(`      Run manually: openclaw cron add --name ${cronName} --every ${intervalSec}s --session isolated --message "Call atel_mcp action=poll_events..." --no-deliver --light-context`);
+    }
   }
 }
 

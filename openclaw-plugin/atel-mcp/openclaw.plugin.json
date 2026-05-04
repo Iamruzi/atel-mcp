@@ -30,6 +30,22 @@
           "type": "string"
         },
         "description": "Requested OAuth scopes for the MCP bridge"
+      },
+      "relayListenHost": {
+        "type": "string",
+        "description": "Bind interface for the platform → plugin push listener. Default 0.0.0.0 (all interfaces). Set to 127.0.0.1 to disable external access."
+      },
+      "relayListenPort": {
+        "type": "number",
+        "description": "Port for the push listener. Default 3101 (avoids the SDK-era 3100). If bind fails (port taken / NAT), plugin falls back to pull mode automatically."
+      },
+      "relayPublicUrl": {
+        "type": "string",
+        "description": "Public-reachable URL the platform should POST events to (e.g. https://lobster.example.com/atel-relay). If unset, plugin auto-detects via api.ipify.org. Falls back to pull mode if neither works."
+      },
+      "relayHmacSecret": {
+        "type": "string",
+        "description": "Optional shared secret matching platform's RELAY_PUSH_HMAC_SECRET. When set, plugin verifies X-Atel-Push-Hmac on inbound pushes; mismatches are rejected."
       }
     }
   }

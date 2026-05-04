@@ -27,6 +27,8 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { drainEvents, getStats, isIdle } from "./inbox.js";
+import { getMode, setupReverseChannel } from "./setup.js";
 
 const DEFAULT_SCOPES = [
   "identity.read",
@@ -140,7 +142,7 @@ function clearPersistedToken(config, identity) {
   }
 }
 
-function readPluginConfig(runtime) {
+export function readPluginConfig(runtime) {
   const loaded = runtime?.config?.loadConfig?.() || {};
   const entry =
     loaded?.plugins?.entries?.["atel-mcp"]?.config ||
@@ -154,6 +156,12 @@ function readPluginConfig(runtime) {
     sdkDistPath: entry.sdkDistPath || process.env.ATEL_SDK_DIST_PATH || DEFAULT_CONFIG.sdkDistPath,
     naclPath: entry.naclPath || process.env.ATEL_NACL_PATH || DEFAULT_CONFIG.naclPath,
     scopes: Array.isArray(entry.scopes) && entry.scopes.length > 0 ? entry.scopes : DEFAULT_CONFIG.scopes,
+
+    // Reverse channel (push mode) — added in 0.2.1.
+    relayListenHost: entry.relayListenHost || process.env.ATEL_RELAY_LISTEN_HOST || "0.0.0.0",
+    relayListenPort: Number(entry.relayListenPort || process.env.ATEL_RELAY_LISTEN_PORT || 3101),
+    relayPublicUrl: entry.relayPublicUrl || process.env.ATEL_RELAY_PUBLIC_URL || null,
+    relayHmacSecret: entry.relayHmacSecret || process.env.ATEL_RELAY_HMAC_SECRET || null,
   };
 }
 
@@ -432,6 +440,70 @@ async function sendMcpRequest(runtime, method, params = {}) {
   return payload?.result ?? null;
 }
 
+// Used by setup.js to call MCP tools during plugin init (e.g.
+// atel_register_endpoint). Public alias of sendMcpRequest.
+export async function sendMcpRequestForRuntime(runtime, method, params) {
+  return await sendMcpRequest(runtime, method, params);
+}
+
+// Poll the reverse channel for events. Two source paths:
+//   - push mode (listener bound + endpoint registered): drain in-memory inbox
+//   - pull mode (NAT / bind failed): fetch /relay/v1/inbox-jwt via MCP server
+// Returns:
+//   - `{ noEvents: true, mode, idle }` when nothing pending → agent should noop
+//   - `{ events: [...], mode, count }` when events exist → agent acts on them
+async function pollEvents(runtime) {
+  const config = readPluginConfig(runtime);
+  const identity = JSON.parse(fs.readFileSync(resolveIdentityPath(config.identityPath), "utf8"));
+  const did = identity.did;
+
+  // First, ALWAYS check the file-backed inbox. If push mode is alive in
+  // any process (gateway or otherwise), events accumulate in the file
+  // regardless of what this child process's getMode() thinks. This also
+  // handles the race where setup() is still running async at the moment
+  // poll_events is invoked: file events are the ground truth.
+  let events = drainEvents(did);
+  let mode = getMode();
+  let usedPullFallback = false;
+
+  if (events.length === 0 && mode !== "push") {
+    // File is empty and we're explicitly in pull mode (or uninitialized
+    // and decided we're not push). Fall back to MCP inbox poll.
+    usedPullFallback = true;
+    try {
+      const inboxResult = await sendMcpRequest(runtime, "tools/call", {
+        name: "atel_inbox_list",
+        arguments: {},
+      });
+      const txt = inboxResult?.content?.[0]?.text ?? "{}";
+      try {
+        const parsed = JSON.parse(txt);
+        events = Array.isArray(parsed?.messages) ? parsed.messages : [];
+      } catch {
+        events = [];
+      }
+    } catch (e) {
+      return { error: `pull_inbox_failed: ${e?.message || String(e)}`, mode };
+    }
+  }
+
+  if (!events || events.length === 0) {
+    // Early return — caller (cron-driven agent) should noop and exit
+    // without consuming output tokens on planning. See PoC token-cost
+    // analysis (Plugin-0.2.1 audit doc §八).
+    return { noEvents: true, mode, idle: isIdle(), did, usedPullFallback };
+  }
+
+  return {
+    events,
+    mode,
+    count: events.length,
+    did,
+    usedPullFallback,
+    stats: getStats(),
+  };
+}
+
 async function listRemoteTools(runtime) {
   const result = await sendMcpRequest(runtime, "tools/list", {});
   return {
@@ -481,14 +553,15 @@ export function createAtelMcpTool(runtime) {
       "Bridge OpenClaw to the ATEL Remote MCP service.",
       "Use action=list to inspect available tools.",
       "Use action=call with a remote tool name and JSON args to execute an ATEL business action.",
+      "Use action=poll_events to drain pending platform → agent notifications (order events, milestone events, settlements). Returns { noEvents: true } when nothing is pending — in that case, just stop, no further action needed. When events exist, react to each per its type.",
     ].join("\n"),
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["list", "call"],
-          description: "list remote tools or call one remote tool",
+          enum: ["list", "call", "poll_events"],
+          description: "list = enumerate remote tools; call = invoke one remote tool; poll_events = drain pending platform notifications",
         },
         tool: {
           type: "string",
@@ -512,6 +585,9 @@ export function createAtelMcpTool(runtime) {
             return textResult({ error: "tool is required when action=call" }, true);
           }
           return textResult(await callRemoteTool(runtime, params.tool, params.args));
+        }
+        if (action === "poll_events") {
+          return textResult(await pollEvents(runtime));
         }
         return textResult({ error: `unsupported action: ${String(action)}` }, true);
       } catch (error) {
