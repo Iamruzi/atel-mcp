@@ -10,6 +10,7 @@ import { createOAuthBridge } from './oauth.js';
 import { AtelMcpError } from '../contracts/errors.js';
 import { parseDeclaredUserMode, parsePreferredRuntimeBackend } from './execution-routing.js';
 import { renderMetrics } from './metrics.js';
+import { createApprovalStore } from '../approval/store.js';
 
 const MCP_VERSION = '0.1.0';
 
@@ -102,6 +103,159 @@ export function createHttpTransportApp() {
   app.get(route('/.well-known/atel-mcp.json'), async (_req: Request, res: Response) => {
     res.json(buildServiceMetadata());
   });
+
+  // ─────── Approval admin endpoints (T5.1/T5.2/T5.4) ────────────────────
+  //
+  // Why these exist alongside the in-process gate: the gate files PENDING
+  // approvals when a high-risk tool runs, but only the operator CLI could
+  // approve them until now. These endpoints let:
+  //   - atel-portal show a queue of pending approvals (GET /admin/approvals)
+  //   - atel-tg-bot push inline keyboard buttons that drive
+  //     POST /admin/approvals/:id/{approve,deny,cancel}
+  //
+  // Auth model: bearerMiddleware verifies the OAuth token; we cross-check
+  // that req.auth.extra.did matches:
+  //   - the listing DID (list / get) — DID can only see their own queue
+  //   - the approval's owner DID (cancel) — only the originator can cancel
+  //   - one of ATEL_MCP_OPERATOR_DIDS (approve / deny) — only operators
+  //     can grant approvals; the originator approving their own action
+  //     would defeat the gate
+  if (config.approvalLogPath) {
+    const approvalStore = createApprovalStore(config.approvalLogPath);
+    const operatorDids = new Set(
+      (process.env.ATEL_MCP_OPERATOR_DIDS || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+
+    // Service-token bypass for tg-bot: tg-bot doesn't hold per-user OAuth
+    // tokens (it auths users via Telegram), so it forwards user actions
+    // with X-Atel-Service-Token (shared secret) + X-Atel-Acting-DID (the
+    // user's DID). Both must be present and the token must match
+    // ATEL_MCP_SERVICE_TOKEN. When the token is missing or empty,
+    // service auth is OFF — admin endpoints accept only OAuth bearer.
+    const serviceToken = (process.env.ATEL_MCP_SERVICE_TOKEN || '').trim();
+
+    function callerDid(req: Request): string | null {
+      // Path 1: standard OAuth bearer.
+      const auth = (req as Request & { auth?: { extra?: { did?: string } } }).auth;
+      if (auth?.extra?.did) return auth.extra.did;
+      // Path 2: service token + acting DID (tg-bot, internal services).
+      if (serviceToken) {
+        const provided = (req.header('x-atel-service-token') || '').trim();
+        const actingDid = (req.header('x-atel-acting-did') || '').trim();
+        if (provided && actingDid && provided === serviceToken) {
+          return actingDid;
+        }
+      }
+      return null;
+    }
+
+    function isOperator(did: string): boolean {
+      return operatorDids.has(did);
+    }
+
+    app.get(route('/admin/approvals'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+      const did = callerDid(req);
+      if (!did) {
+        res.status(401).json({ error: 'unauthenticated' });
+        return;
+      }
+      try {
+        const list = await approvalStore.list(did);
+        res.json({ count: list.length, approvals: list });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(500).json({ error: 'list failed', detail: message });
+      }
+    });
+
+    app.get(route('/admin/approvals/:id'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+      const did = callerDid(req);
+      if (!did) {
+        res.status(401).json({ error: 'unauthenticated' });
+        return;
+      }
+      try {
+        const record = await approvalStore.get(String(req.params.id ?? ""));
+        if (!record) {
+          res.status(404).json({ error: 'not found' });
+          return;
+        }
+        // Non-operators only see their own approvals.
+        if (record.did !== did && !isOperator(did)) {
+          res.status(403).json({ error: 'forbidden' });
+          return;
+        }
+        res.json(record);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(500).json({ error: 'get failed', detail: message });
+      }
+    });
+
+    app.post(route('/admin/approvals/:id/approve'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+      const did = callerDid(req);
+      if (!did) {
+        res.status(401).json({ error: 'unauthenticated' });
+        return;
+      }
+      if (!isOperator(did)) {
+        res.status(403).json({
+          error: 'operator only',
+          hint: 'Only DIDs listed in ATEL_MCP_OPERATOR_DIDS can approve. The originator cannot approve their own action.',
+        });
+        return;
+      }
+      try {
+        const { operatorApprove } = await import('../approval/gate.js');
+        const next = await operatorApprove(config.approvalLogPath!, String(req.params.id ?? ""), did);
+        res.json(next);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(400).json({ error: 'approve failed', detail: message });
+      }
+    });
+
+    app.post(route('/admin/approvals/:id/deny'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+      const did = callerDid(req);
+      if (!did) {
+        res.status(401).json({ error: 'unauthenticated' });
+        return;
+      }
+      if (!isOperator(did)) {
+        res.status(403).json({ error: 'operator only' });
+        return;
+      }
+      const reason = String((req.body as { reason?: string } | undefined)?.reason ?? '').slice(0, 500);
+      try {
+        const { operatorDeny } = await import('../approval/gate.js');
+        const next = await operatorDeny(config.approvalLogPath!, String(req.params.id ?? ""), reason || 'no reason given');
+        res.json(next);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(400).json({ error: 'deny failed', detail: message });
+      }
+    });
+
+    app.post(route('/admin/approvals/:id/cancel'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+      const did = callerDid(req);
+      if (!did) {
+        res.status(401).json({ error: 'unauthenticated' });
+        return;
+      }
+      const reason = String((req.body as { reason?: string } | undefined)?.reason ?? '').slice(0, 500);
+      try {
+        const { ownerCancel } = await import('../approval/gate.js');
+        const next = await ownerCancel(config.approvalLogPath!, String(req.params.id ?? ""), did, reason || 'no reason given');
+        res.json(next);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(400).json({ error: 'cancel failed', detail: message });
+      }
+    });
+  }
 
   app.post(route('/mcp'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
     const meta = extractRequestMeta(req);
