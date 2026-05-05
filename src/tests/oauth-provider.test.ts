@@ -25,6 +25,7 @@ const baseConfig = {
   runtimeLinksPath: '.runtime/runtime-links.json',
   runtimeLinksEnabled: true,
   auditPlatformIngestEnabled: false,
+  auditPlatformReadEnabled: false,
   mcpInstance: 'test-instance',
 };
 

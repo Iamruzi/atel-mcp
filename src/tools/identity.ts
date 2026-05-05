@@ -9,7 +9,7 @@ import {
   RuntimeLinkStatusOutputSchema,
   WhoamiOutputSchema,
 } from '../contracts/schemas.js';
-import { recoverIdentity, registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
+import { recoverIdentity, recoverSecretKey, registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
 import { getRuntimeLink, removeRuntimeLink, upsertRuntimeLink } from '../runtime-links/store.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
@@ -90,6 +90,20 @@ export async function atelRegisterUser(ctx: ToolExecutionContext, input: unknown
 export async function atelRecover(ctx: ToolExecutionContext, input: unknown) {
   const parsed = RecoverInputSchema.parse(input);
   return recoverIdentity(ctx.config, parsed);
+}
+
+/**
+ * Recover the full secretKey for a DID using its recoveryCode. Different
+ * from atelRecover above: that one only returns the DID; this one returns
+ * the actual secretKey, which the caller can use to rebuild
+ * .atel/identity.json on a fresh machine after losing the local copy.
+ *
+ * Requires server-side KEK backup (mcp_secret_key_backups row); identities
+ * registered before that feature shipped get 410 Gone with a hint.
+ */
+export async function atelSecretKeyRecover(ctx: ToolExecutionContext, input: unknown) {
+  const parsed = RecoverInputSchema.parse(input);
+  return recoverSecretKey(ctx.config, parsed);
 }
 
 export async function atelAgentRegister(ctx: ToolExecutionContext, input: unknown) {

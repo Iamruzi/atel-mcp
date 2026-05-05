@@ -32,16 +32,24 @@ test('register_endpoint schema: accepts valid https URL', () => {
   assert.equal(r.endpoint, 'https://agent.example.com/callback');
 });
 
-test('register_endpoint schema: rejects http://', () => {
-  assert.throws(() => RegisterEndpointInputSchema.parse({ endpoint: 'http://agent.example.com' }));
+test('register_endpoint schema: accepts http:// (server decides if env permits)', () => {
+  // Schema is permissive at client level — production still rejects
+  // http on the server side. Lets non-prod (testnet/staging) deployments
+  // register without manual DB editing.
+  const r = RegisterEndpointInputSchema.parse({ endpoint: 'http://65.20.98.18:3101' });
+  assert.equal(r.endpoint, 'http://65.20.98.18:3101');
 });
 
 test('register_endpoint schema: rejects invalid URL', () => {
   assert.throws(() => RegisterEndpointInputSchema.parse({ endpoint: 'not-a-url' }));
 });
 
-test('register_endpoint schema: rejects ftp://', () => {
+test('register_endpoint schema: rejects non-http schemes (ftp/ws/file)', () => {
+  // These would always fail server-side — reject early at schema level
+  // so the user gets a clean error rather than a surprising network roundtrip.
   assert.throws(() => RegisterEndpointInputSchema.parse({ endpoint: 'ftp://agent.example.com' }));
+  assert.throws(() => RegisterEndpointInputSchema.parse({ endpoint: 'ws://agent.example.com' }));
+  assert.throws(() => RegisterEndpointInputSchema.parse({ endpoint: 'file:///tmp/x' }));
 });
 
 test('register_endpoint schema: optional label accepted with size limit', () => {

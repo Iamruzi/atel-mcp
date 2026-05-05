@@ -29,6 +29,15 @@ export interface AtelMcpConfig {
   auditPlatformIngestEnabled: boolean;
   /** Bearer token for the platform audit ingest endpoint (separate from user sessions). */
   auditPlatformIngestToken?: string;
+  /**
+   * Whether atel_audit_* read tools should call platform first (with the
+   * same shared-secret token), falling back to JSONL only on error.
+   * Default false — preserves the current local-JSONL behavior until
+   * platform write side is reliably populated. Independent toggle from
+   * ingest because read paths can be enabled before write side is fully
+   * backfilled.
+   */
+  auditPlatformReadEnabled: boolean;
   /** Identifier for this MCP instance — used by platform de-dup if MCP runs HA. */
   mcpInstance: string;
   approvalLogPath?: string;
@@ -125,6 +134,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     auditLogPath: env.ATEL_MCP_AUDIT_LOG_PATH?.trim() || undefined,
     auditPlatformIngestEnabled: env.ATEL_MCP_AUDIT_PLATFORM_INGEST?.trim().toLowerCase() === 'true',
     auditPlatformIngestToken: env.ATEL_MCP_AUDIT_PLATFORM_INGEST_TOKEN?.trim() || undefined,
+    auditPlatformReadEnabled: env.ATEL_MCP_AUDIT_PLATFORM_READ?.trim().toLowerCase() === 'true',
     mcpInstance: env.ATEL_MCP_INSTANCE_ID?.trim() || env.HOSTNAME?.trim() || `${host}:${port}`,
     approvalLogPath: env.ATEL_MCP_APPROVAL_LOG_PATH?.trim() || undefined,
     approvalBypassTools: parseCsvList(env.ATEL_MCP_APPROVAL_BYPASS_TOOLS, []),

@@ -5,7 +5,8 @@ export const PLATFORM_ENDPOINTS = {
     session: '/auth/v1/session',
     me: '/auth/v1/me',
     register: '/auth/v1/register', // T3.1.1 — mints fresh identity (no auth required)
-    recovery: '/auth/v1/recovery'  // T3.1.5 — look up DID by recovery code (no auth required)
+    recovery: '/auth/v1/recovery',  // T3.1.5 — look up DID by recovery code (no auth required)
+    secretKeyRecover: '/auth/v1/secret-key-recover' // T3.1.5+ — recover full secretKey via recoveryCode (KEK-encrypted backup, no auth)
   },
   registry: {
     register: '/registry/v1/register',

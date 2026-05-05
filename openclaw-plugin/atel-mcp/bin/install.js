@@ -27,7 +27,12 @@ const home = process.env.HOME || process.env.USERPROFILE || ".";
 const openclawHome = valueOf("--openclaw-home") || process.env.OPENCLAW_HOME || path.join(home, ".openclaw");
 const configPath = valueOf("--config") || process.env.OPENCLAW_CONFIG_PATH || path.join(openclawHome, "openclaw.json");
 const extensionsDir = valueOf("--extensions-dir") || process.env.OPENCLAW_EXTENSIONS_DIR || path.join(openclawHome, "extensions");
-const extensionDir = path.join(extensionsDir, "atel-mcp");
+// Extension dir is named after the plugin id so a fresh install lands on
+// the canonical path. Older installs at <extensionsDir>/atel-mcp are left
+// in place to avoid breaking OpenClaw runtimes mid-restart; the next
+// install run cleans them up via the legacy-id removal below.
+const extensionDir = path.join(extensionsDir, "atel-mcp-openclaw");
+const legacyExtensionDir = path.join(extensionsDir, "atel-mcp");
 const identityPath = valueOf("--identity") || process.env.ATEL_IDENTITY_PATH || firstFile([
   path.join(process.cwd(), ".atel", "identity.json"),
   path.join(home, ".atel", "identity.json"),
@@ -44,6 +49,11 @@ fs.mkdirSync(extensionsDir, { recursive: true });
 const backup = `${configPath}.bak-atel-mcp-${new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14)}`;
 fs.copyFileSync(configPath, backup);
 fs.rmSync(extensionDir, { recursive: true, force: true });
+// Wipe any pre-rename install at the legacy path so OpenClaw doesn't
+// load the same plugin twice (once under each id) on next gateway start.
+if (fs.existsSync(legacyExtensionDir)) {
+  fs.rmSync(legacyExtensionDir, { recursive: true, force: true });
+}
 fs.cpSync(packageRoot, extensionDir, { recursive: true });
 
 try {
@@ -58,11 +68,22 @@ try {
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 config.plugins = config.plugins && typeof config.plugins === "object" ? config.plugins : {};
 const allow = Array.isArray(config.plugins.allow) ? config.plugins.allow : [];
-if (!allow.includes("atel-mcp")) allow.push("atel-mcp");
-config.plugins.allow = allow;
+// Plugin id MUST match the npm package name so OpenClaw's plugin loader
+// stops warning about "manifest uses atel-mcp, entry hints atel-mcp-openclaw"
+// every time it lists plugins. Migration: drop the legacy "atel-mcp" id and
+// re-add the canonical one. Keeps any other allowed plugin entries intact.
+const PLUGIN_ID = "atel-mcp-openclaw";
+const LEGACY_ID = "atel-mcp";
+const migratedAllow = allow.filter((entry) => entry !== LEGACY_ID && entry !== PLUGIN_ID);
+migratedAllow.push(PLUGIN_ID);
+config.plugins.allow = migratedAllow;
 config.plugins.entries = config.plugins.entries && typeof config.plugins.entries === "object" ? config.plugins.entries : {};
 config.plugins.installs = config.plugins.installs && typeof config.plugins.installs === "object" ? config.plugins.installs : {};
-config.plugins.entries["atel-mcp"] = {
+// Drop legacy id entries before writing the canonical one — otherwise both
+// would coexist and OpenClaw would load the plugin twice.
+delete config.plugins.entries[LEGACY_ID];
+delete config.plugins.installs[LEGACY_ID];
+config.plugins.entries[PLUGIN_ID] = {
   enabled: true,
   config: {
     serverBaseUrl,
@@ -81,14 +102,14 @@ config.plugins.entries["atel-mcp"] = {
     ]
   }
 };
-config.plugins.installs["atel-mcp"] = {
+config.plugins.installs[PLUGIN_ID] = {
   source: "npm",
   spec: "atel-mcp-openclaw",
   installPath: extensionDir,
-  version: "0.1.3",
+  version: "0.2.1",
   resolvedName: "atel-mcp-openclaw",
-  resolvedVersion: "0.1.3",
-  resolvedSpec: "atel-mcp-openclaw@0.1.3",
+  resolvedVersion: "0.2.1",
+  resolvedSpec: "atel-mcp-openclaw@0.2.1",
   installedAt: new Date().toISOString()
 };
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");

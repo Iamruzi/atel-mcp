@@ -18,6 +18,11 @@
 export const PRE_AUTH_TOOLS = new Set<string>([
   'atel_register_user',
   'atel_recover',
+  // atel_secret_key_recover is unauthenticated by design — the caller has
+  // lost their secretKey, so they can't sign a DID-Sig envelope to prove
+  // ownership. The recoveryCode IS the proof: anyone holding it gets the
+  // secretKey back. Server-side rate-limit must accompany this in prod.
+  'atel_secret_key_recover',
 ]);
 
 export function isPreAuthTool(name: string): boolean {

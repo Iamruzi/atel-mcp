@@ -18,12 +18,12 @@ export const RegisterUserInputSchema = z.object({
 });
 
 // Onboarding (T3.1.3): advertise a callback endpoint for async events.
-// Server is the authority on scheme: production rejects http://, non-prod
-// (ATEL_ENV_PROFILE=development|staging|test) accepts it. The schema
-// validates URL shape only — letting the server do the env-aware decision
-// avoids client/server drift when the deployment profile changes.
+// Server is the authority on http-vs-https decision (production rejects
+// http://, non-prod ATEL_ENV_PROFILE=development|staging|test accepts it).
+// Client-side we only require a valid http(s) URL — non-http schemes
+// (ftp://, ws://, file://) would always fail server-side, so reject early.
 export const RegisterEndpointInputSchema = z.object({
-  endpoint: z.string().url(),
+  endpoint: z.string().url().regex(/^https?:\/\//, 'endpoint must be http:// or https://'),
   label: z.string().min(1).max(64).optional()
 });
 

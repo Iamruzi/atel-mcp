@@ -45,6 +45,38 @@ export async function recoverIdentity(
   return body;
 }
 
+/**
+ * Pre-auth: POST /auth/v1/secret-key-recover. Returns the full secretKey
+ * (base64) for the DID associated with the supplied recoveryCode.
+ *
+ * Distinct from recoverIdentity above:
+ *   - recoverIdentity only returns the DID — the user is assumed to still
+ *     hold their secretKey and just forgot which DID it belongs to.
+ *   - recoverSecretKey returns the actual secretKey for users who lost
+ *     their local copy. Requires that the DID was registered AFTER
+ *     server-side KEK backup was enabled (rows in mcp_secret_key_backups);
+ *     older DIDs return 410 Gone with an explanatory hint.
+ *
+ * Server-side decrypts ciphertext with HKDF(KEK, recoveryCode), so neither
+ * DB exfil alone nor KEK env exfil alone is sufficient to recover.
+ */
+export async function recoverSecretKey(
+  config: import('../config.js').AtelMcpConfig,
+  input: { recoveryCode: string },
+): Promise<unknown> {
+  const url = `${config.platformBaseUrl.replace(/\/+$/, '')}${PLATFORM_ENDPOINTS.auth.secretKeyRecover}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!response.ok) {
+    throw new Error(`platform /auth/v1/secret-key-recover failed: ${response.status} ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
 export async function registrySearch(ctx: ToolExecutionContext, input: { query: string; capability?: string }) {
   return ctx.platform.request<unknown>({
     method: 'GET',
