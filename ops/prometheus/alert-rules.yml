@@ -1,0 +1,115 @@
+# Prometheus alert rules for atel-mcp.
+#
+# Drop into your Prometheus rule_files: directory and reload. Pair with
+# Alertmanager routing — these rules emit Alertmanager-compatible
+# alerts with severity labels (page / ticket / info).
+#
+# Tuning notes:
+#   - "for: 5m" guards against single-spike false positives. Tune up
+#     for noisier services, down if you want faster paging.
+#   - Thresholds are calibrated for the testnet load profile (single-digit
+#     QPS). Bump rate/error windows to 30m if you scale to 100+ QPS so
+#     short stalls don't fire instant alerts.
+
+groups:
+  - name: atel_mcp_critical
+    rules:
+
+      # 1. Instance down — process unreachable for ≥2m. Watchdog should
+      # have caught it sooner; this catches "systemd thinks it's running
+      # but it's not actually answering scrapes" (e.g. wedged event loop
+      # before the watchdog miss).
+      - alert: AtelMcpInstanceDown
+        expr: up{job="atel-mcp"} == 0
+        for: 2m
+        labels:
+          severity: page
+          service: atel-mcp
+        annotations:
+          summary: "atel-mcp instance {{ $labels.instance }} is down"
+          description: |
+            Prometheus has been unable to scrape /metrics for ≥2m.
+            Check: `systemctl status atel-mcp` and `journalctl -u atel-mcp -n 100`.
+          runbook: "docs/runbooks/rollback.md"
+
+      # 2. Error rate spike — >5% errors over 5m. Errors here are
+      # tool-execution errors (any non-ok status), so an attacker-driven
+      # 4xx flood looks the same as an upstream-flake-driven 5xx flood.
+      # Both warrant attention. Use the dashboard tool-breakdown panel
+      # to figure out which.
+      - alert: AtelMcpErrorRateHigh
+        expr: |
+          (
+            sum(rate(atel_mcp_tool_calls_total{status="error"}[5m]))
+            /
+            clamp_min(sum(rate(atel_mcp_tool_calls_total[5m])), 0.0001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: page
+          service: atel-mcp
+        annotations:
+          summary: "atel-mcp error rate >5% for 5m"
+          description: |
+            Tool calls failing >5% of the time. Drill in via dashboard
+            "Errors / sec by tool" panel. Common root causes:
+              - platform 5xx (check upstream panel)
+              - DID-Sig clock skew (check NTP)
+              - new client deploying a contract-broken request shape
+
+      # 3. Latency p99 over 5s for 5m. Either the platform is slow or
+      # something in MCP is doing too much work synchronously (audit
+      # JSONL contention, runtime-link timeout).
+      - alert: AtelMcpP99LatencyHigh
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(atel_mcp_tool_duration_ms_bucket[5m]))
+          ) > 5000
+        for: 5m
+        labels:
+          severity: ticket
+          service: atel-mcp
+        annotations:
+          summary: "atel-mcp p99 latency >5s for 5m"
+          description: |
+            99th percentile tool handler latency exceeded 5s. Check
+            dashboard "p95 latency by tool" to identify the offender,
+            then check platform upstream panel — slow platform usually
+            shows up as MCP slowness.
+
+  - name: atel_mcp_warnings
+    rules:
+
+      # 4. Platform 5xx surge — more than 0.1 req/sec sustained 5xx
+      # responses from upstream. Doesn't always page (the user-facing
+      # error rate alert above will catch user impact); files a ticket
+      # for ops to investigate platform health.
+      - alert: AtelMcpPlatformErrors
+        expr: sum(rate(atel_mcp_platform_request_total{status_class=~"5xx|error"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: ticket
+          service: atel-mcp
+          target: platform
+        annotations:
+          summary: "atel-mcp upstream platform 5xx/error rate >0.1/s for 10m"
+          description: |
+            Platform is returning errors at sustained rate. Check
+            atel-platform pm2 logs and `/audit/v1/mcp/by-*` rows for
+            patterns. May warrant a platform restart drill.
+
+      # 5. Sustained scope denials — usually means a misconfigured
+      # client. Files a ticket so we can reach out.
+      - alert: AtelMcpScopeDenials
+        expr: sum(rate(atel_mcp_dispatch_total{scope_check="denied"}[15m])) > 0.5
+        for: 15m
+        labels:
+          severity: info
+          service: atel-mcp
+        annotations:
+          summary: "atel-mcp scope denials >0.5/s for 15m"
+          description: |
+            Tool calls are being rejected at scope check at sustained rate.
+            Most likely a host with stale scopes — check audit log for
+            the offending DID and reach out.

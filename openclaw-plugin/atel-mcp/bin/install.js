@@ -132,32 +132,78 @@ if (!has("--no-restart")) {
   }
 }
 
+// Wait for the gateway socket to come back up. The cron CLI talks to the
+// gateway via its UNIX/TCP RPC, so calling `openclaw cron list` immediately
+// after a systemctl restart races the gateway boot and intermittently
+// fails. We give it up to ~10s of grace, polling at 250ms intervals.
+//
+// Skipped if --no-restart is set (in which case the gateway might be
+// owned by the user and may or may not be up — caller's responsibility).
+function waitForGatewayReady(maxAttempts = 40, delayMs = 250) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      execFileSync("openclaw", ["cron", "list", "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+      return true;
+    } catch {
+      // sleep — synchronous, since execFileSync is already sync.
+      const start = Date.now();
+      while (Date.now() - start < delayMs) { /* spin briefly */ }
+    }
+  }
+  return false;
+}
+if (!has("--no-restart") && !has("--no-cron")) {
+  if (!waitForGatewayReady()) {
+    console.error("warn: openclaw gateway not responding after restart — cron registration may fail; rerun install or run cron command from summary below.");
+  }
+}
+
 // Register a recurring cron job that drives poll_events. This is the only
 // way for plugin to reach into the agent — OpenClaw doesn't expose a
 // "trigger turn" API to plugins (verified 2026-05-04). Cron persists in
 // ~/.openclaw/cron/jobs.json so plugin restart doesn't lose it.
 //
 // Idempotent: if a cron with name "atel-mcp-poll" already exists, we
-// don't add a duplicate.
+// don't add a duplicate. Each operation is retried up to 3 times with
+// 1s backoff because the gateway can be momentarily busy right after a
+// fresh restart.
+function tryWithRetry(label, fn, maxAttempts = 3, delayMs = 1000) {
+  let lastErr;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return { ok: true, value: fn() };
+    } catch (e) {
+      lastErr = e;
+      if (i < maxAttempts - 1) {
+        const start = Date.now();
+        while (Date.now() - start < delayMs) { /* spin briefly */ }
+      }
+    }
+  }
+  return { ok: false, error: lastErr, label };
+}
+
 if (!has("--no-cron")) {
   const intervalSec = Number(process.env.ATEL_RELAY_CRON_INTERVAL_SEC || 30);
   const cronName = "atel-mcp-poll";
   let existsAlready = false;
-  try {
-    const list = execFileSync("openclaw", ["cron", "list", "--json"], { encoding: "utf-8" });
-    const parsed = JSON.parse(list);
+  const listResult = tryWithRetry("cron list", () => {
+    const out = execFileSync("openclaw", ["cron", "list", "--json"], { encoding: "utf-8" });
+    return JSON.parse(out);
+  });
+  if (listResult.ok) {
+    const parsed = listResult.value;
     if (Array.isArray(parsed?.jobs) && parsed.jobs.some((j) => j.name === cronName)) {
       existsAlready = true;
     }
-  } catch {
-    // CLI/parse error — fall through and try add. If add ALSO fails the
-    // user can manually run the command from the install summary below.
   }
+  // Note: if listResult.ok is false we still fall through to add — the add
+  // call will either succeed or print the manual fallback below.
 
   if (existsAlready) {
     console.log(`cron job '${cronName}' already present — keeping it.`);
   } else {
-    try {
+    const addResult = tryWithRetry("cron add", () => {
       execFileSync(
         "openclaw",
         [
@@ -166,19 +212,42 @@ if (!has("--no-cron")) {
           "--every", `${intervalSec}s`,
           "--session", "isolated",
           "--message",
-          // Message is short on purpose. The agent's job is just to poll
-          // and either noop (no events) or react. Long prompts here
-          // would inflate input tokens on every cron tick.
-          "Call atel_mcp action=poll_events. If the result has noEvents:true, just stop — do not summarize. Otherwise process each event in the result and take the appropriate next action (e.g. submit the next milestone if a previous one was just verified).",
+          // Cron message — runs every 30s. Two cost+correctness goals:
+          // (1) inflated by 1 event per tick, the message must stay
+          //     short or input tokens explode (~15K with full ATEL
+          //     tool catalog already in scope).
+          // (2) the agent must NOT chatter about "no events"; the noEvents
+          //     short-circuit keeps cron silent at idle.
+          // Decision rules per event type are summarized inline so the
+          // agent doesn't need to reload SKILL.md just to handle a
+          // standard A2A milestone progression event.
+          [
+            "Call atel_mcp action=poll_events.",
+            "",
+            "If the result has noEvents:true, stop immediately — do not summarize, do not respond.",
+            "",
+            "Otherwise process events in order (newest first). Skip any event with _receivedAt older than 5 minutes ago — those are stale catch-up events from when the runtime was offline; the originator already retried or moved on.",
+            "",
+            "Action rules per event message.kind:",
+            "- order_accepted / order_milestones_proposed → if I'm the requester, review the milestone plan; if the price + scope look right, call atel_milestone_plan_feedback approved=true; else approved=false with feedback.",
+            "- milestone_submitted → if I'm the requester, review the deliverable; if it satisfies the milestone, call atel_milestone_verify; else atel_milestone_revise with feedback.",
+            "- milestone_verified → if I'm the executor and there's a next milestone, call atel_milestone_submit for it.",
+            "- order_completed / order_settled / dispute_* → log only, no action needed.",
+            "",
+            "If unsure, log the event and stop — better to do nothing than take a wrong action."
+          ].join("\n"),
           "--no-deliver",
           "--light-context",
         ],
         { stdio: "inherit" },
       );
+    });
+    if (addResult.ok) {
       console.log(`cron job '${cronName}' registered (every ${intervalSec}s).`);
-    } catch {
-      console.error(`warn: could not register cron job '${cronName}'. Reverse channel will not auto-trigger.`);
-      console.error(`      Run manually: openclaw cron add --name ${cronName} --every ${intervalSec}s --session isolated --message "Call atel_mcp action=poll_events..." --no-deliver --light-context`);
+    } else {
+      console.error(`warn: could not register cron job '${cronName}' after 3 retries. Reverse channel will not auto-trigger.`);
+      console.error(`      Run manually:`);
+      console.error(`      openclaw cron add --name ${cronName} --every ${intervalSec}s --session isolated --message "Call atel_mcp action=poll_events. If noEvents:true stop, otherwise process events." --no-deliver --light-context`);
     }
   }
 }

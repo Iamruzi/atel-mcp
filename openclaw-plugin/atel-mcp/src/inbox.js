@@ -32,6 +32,31 @@ function ensureInboxDir() {
   fs.mkdirSync(INBOX_DIR, { recursive: true });
 }
 
+// Clean up stale tmp files left over from drains that crashed mid-rename.
+// Without this, a host that crashes during drain accumulates *.read-*
+// files that grow forever. Called opportunistically from drainEvents and
+// pushEvent so we don't need a separate cron.
+const STALE_TMP_AGE_MS = 5 * 60 * 1000;
+function cleanStaleTmpFiles() {
+  try {
+    const cutoff = Date.now() - STALE_TMP_AGE_MS;
+    for (const name of fs.readdirSync(INBOX_DIR)) {
+      if (!name.includes(".read-")) continue;
+      const full = path.join(INBOX_DIR, name);
+      try {
+        const stat = fs.statSync(full);
+        if (stat.mtimeMs < cutoff) {
+          fs.unlinkSync(full);
+        }
+      } catch {
+        // file vanished concurrently or stat failed — fine
+      }
+    }
+  } catch {
+    // inbox dir might not exist yet on first call — ignore
+  }
+}
+
 function inboxFile(did) {
   // Truncated SHA-256 hex; collision-resistant for our scale (one row
   // per ATEL identity), short enough to keep filesystem happy.
@@ -42,6 +67,9 @@ function inboxFile(did) {
 export function pushEvent(did, event) {
   if (!did || !event) return false;
   ensureInboxDir();
+  // Opportunistic cleanup — every push is a chance to mop up stale tmps
+  // without paying the cost of a separate sweeper.
+  cleanStaleTmpFiles();
   const line = JSON.stringify({ event, receivedAt: Date.now() }) + "\n";
   fs.appendFileSync(inboxFile(did), line);
   // touch a global heartbeat file so isIdle() can answer cross-process
@@ -52,8 +80,14 @@ export function pushEvent(did, event) {
 // Atomic-ish drain: rename the inbox file to a tmp name (preventing
 // further appends from leaking into the read), read everything, delete.
 // If the file doesn't exist, return [].
+//
+// Returns events newest-first so the agent processes recent events first
+// when summarizing — matches user expectation that "the latest thing
+// that happened" is the most relevant signal.
 export function drainEvents(did) {
   if (!did) return [];
+  ensureInboxDir();
+  cleanStaleTmpFiles(); // opportunistic
   const src = inboxFile(did);
   if (!fs.existsSync(src)) return [];
   const tmp = src + `.read-${process.pid}-${Date.now()}`;
@@ -72,20 +106,34 @@ export function drainEvents(did) {
   }
   const cutoff = Date.now() - TTL_MS;
   const events = [];
+  let droppedTTL = 0;
   for (const line of raw.split("\n")) {
     if (!line) continue;
     try {
       const row = JSON.parse(line);
-      if (row.receivedAt && row.receivedAt < cutoff) continue;
-      events.push(row.event);
+      if (row.receivedAt && row.receivedAt < cutoff) {
+        droppedTTL += 1;
+        continue;
+      }
+      // Tag each event with its receivedAt so the agent can decide what's
+      // recent enough to act on (avoid acting on hours-old stale events
+      // that arrived while the agent was offline).
+      events.push({ ...row.event, _receivedAt: row.receivedAt });
     } catch {
       // skip malformed line — defensive
     }
   }
-  // Enforce per-drain size cap (oldest dropped first if over limit)
-  if (events.length > MAX_PER_DID) {
-    events.splice(0, events.length - MAX_PER_DID);
+  if (droppedTTL > 0) {
+    console.log(`[atel-mcp/inbox] drained, dropped ${droppedTTL} stale events (>${TTL_MS / 3600 / 1000}h old)`);
   }
+  // Enforce per-drain size cap (newest kept; oldest dropped if over limit)
+  if (events.length > MAX_PER_DID) {
+    const dropped = events.length - MAX_PER_DID;
+    events.splice(0, dropped);
+    console.log(`[atel-mcp/inbox] over MAX_PER_DID — dropped ${dropped} oldest events`);
+  }
+  // Newest first.
+  events.reverse();
   return events;
 }
 

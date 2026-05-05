@@ -1,14 +1,69 @@
 [Unit]
 Description=ATEL MCP Remote Server
-After=network.target
+Documentation=https://github.com/AtelLab/atel-mcp
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
+# Type=notify pairs with sd_notify("READY=1") in src/server/http.ts so
+# systemd waits for the HTTP listener to be up before transitioning the
+# unit to 'active'. Without this, a startup error that hangs before
+# binding wouldn't be surfaced — pm2-style early failure detection.
+Type=notify
+NotifyAccess=main
+
 WorkingDirectory=/opt/atel-mcp
 EnvironmentFile=-/etc/atel/atel-mcp.env
 ExecStart=/usr/bin/node dist/server/http.js
-Restart=always
-RestartSec=5
+
+# Watchdog: process must send WATCHDOG=1 within 30s of the previous one
+# (we send at WATCHDOG_USEC/2 = 15s cadence). If the event loop is
+# blocked or we deadlock, systemd kills + restarts us instead of the
+# process going zombie.
+WatchdogSec=30s
+
+# Restart policy. on-failure covers crash; on-watchdog covers the
+# WATCHDOG=1 miss case above; on-abnormal covers signals. We don't
+# restart on Type=notify "wrong notification" since that's a code bug
+# (would crash-loop).
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=60s
+StartLimitBurst=10
+
+# Graceful shutdown: src/server/http.ts handles SIGTERM with a 10s inner
+# drain timeout. Systemd's outer TimeoutStopSec= must be >= that.
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+SendSIGKILL=yes
+
+# Logging: stdout/stderr → journald, identified as 'atel-mcp' so
+# `journalctl -u atel-mcp -f` and `journalctl -t atel-mcp` both work.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atel-mcp
+
+# Security hardening — these are belt-and-suspenders for a Node process
+# that doesn't need any unusual capabilities. If you add functionality
+# requiring filesystem writes outside WorkingDirectory or device access,
+# loosen the corresponding option here rather than disabling all of them.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+
+# Allow writes to:
+#   - the working directory (for audit JSONL, approval store, runtime-links)
+#   - /tmp (for any temp files; PrivateTmp keeps it isolated)
+ReadWritePaths=/opt/atel-mcp
 
 [Install]
 WantedBy=multi-user.target
