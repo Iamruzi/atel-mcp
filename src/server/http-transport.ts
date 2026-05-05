@@ -137,26 +137,47 @@ export function createHttpTransportApp() {
     // service auth is OFF — admin endpoints accept only OAuth bearer.
     const serviceToken = (process.env.ATEL_MCP_SERVICE_TOKEN || '').trim();
 
-    function callerDid(req: Request): string | null {
-      // Path 1: standard OAuth bearer.
-      const auth = (req as Request & { auth?: { extra?: { did?: string } } }).auth;
-      if (auth?.extra?.did) return auth.extra.did;
-      // Path 2: service token + acting DID (tg-bot, internal services).
+    // Hybrid auth middleware. The MCP SDK's bearerMiddleware rejects
+    // requests without `Authorization: Bearer ...` BEFORE our handler
+    // runs, which kills the service-token path. So for /admin/approvals/*
+    // we run a custom middleware that accepts EITHER:
+    //   - OAuth bearer (delegates to oauth.bearerMiddleware)
+    //   - X-Atel-Service-Token + X-Atel-Acting-DID (sets req.auth.extra.did)
+    // The handler then reads callerDid(req) which works for both paths.
+    function adminAuthMiddleware(req: Request, res: Response, next: () => void) {
+      // Service-token path (preferred for tg-bot / internal services).
       if (serviceToken) {
         const provided = (req.header('x-atel-service-token') || '').trim();
         const actingDid = (req.header('x-atel-acting-did') || '').trim();
         if (provided && actingDid && provided === serviceToken) {
-          return actingDid;
+          // Stamp synthetic AuthInfo so callerDid() finds it. Fields
+          // mirror what the real OAuth path produces (clientId / scopes
+          // are best-effort placeholders since this is a service call,
+          // not a per-user OAuth session).
+          (req as Request & { auth?: unknown }).auth = {
+            token: 'service-token',
+            clientId: 'atel-mcp-service',
+            scopes: ['identity.read', 'orders.read', 'orders.write'],
+            extra: { did: actingDid },
+          };
+          next();
+          return;
         }
       }
-      return null;
+      // Fall through to OAuth bearer.
+      oauth.bearerMiddleware(req as never, res as never, next as never);
+    }
+
+    function callerDid(req: Request): string | null {
+      const auth = (req as Request & { auth?: { extra?: { did?: string } } }).auth;
+      return auth?.extra?.did ?? null;
     }
 
     function isOperator(did: string): boolean {
       return operatorDids.has(did);
     }
 
-    app.get(route('/admin/approvals'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+    app.get(route('/admin/approvals'), adminAuthMiddleware, async (req: Request, res: Response) => {
       const did = callerDid(req);
       if (!did) {
         res.status(401).json({ error: 'unauthenticated' });
@@ -171,7 +192,7 @@ export function createHttpTransportApp() {
       }
     });
 
-    app.get(route('/admin/approvals/:id'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+    app.get(route('/admin/approvals/:id'), adminAuthMiddleware, async (req: Request, res: Response) => {
       const did = callerDid(req);
       if (!did) {
         res.status(401).json({ error: 'unauthenticated' });
@@ -195,7 +216,7 @@ export function createHttpTransportApp() {
       }
     });
 
-    app.post(route('/admin/approvals/:id/approve'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+    app.post(route('/admin/approvals/:id/approve'), adminAuthMiddleware, async (req: Request, res: Response) => {
       const did = callerDid(req);
       if (!did) {
         res.status(401).json({ error: 'unauthenticated' });
@@ -218,7 +239,7 @@ export function createHttpTransportApp() {
       }
     });
 
-    app.post(route('/admin/approvals/:id/deny'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+    app.post(route('/admin/approvals/:id/deny'), adminAuthMiddleware, async (req: Request, res: Response) => {
       const did = callerDid(req);
       if (!did) {
         res.status(401).json({ error: 'unauthenticated' });
@@ -239,7 +260,7 @@ export function createHttpTransportApp() {
       }
     });
 
-    app.post(route('/admin/approvals/:id/cancel'), oauth.bearerMiddleware, async (req: Request, res: Response) => {
+    app.post(route('/admin/approvals/:id/cancel'), adminAuthMiddleware, async (req: Request, res: Response) => {
       const did = callerDid(req);
       if (!did) {
         res.status(401).json({ error: 'unauthenticated' });

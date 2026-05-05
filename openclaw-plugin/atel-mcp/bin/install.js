@@ -183,25 +183,80 @@ function tryWithRetry(label, fn, maxAttempts = 3, delayMs = 1000) {
   return { ok: false, error: lastErr, label };
 }
 
+// Cron message — runs every 30s. Two cost+correctness goals:
+//   (1) inflated by 1 event per tick, the message must stay short or
+//       input tokens explode (~15K with full ATEL tool catalog already
+//       in scope).
+//   (2) the agent must NOT chatter about "no events"; the noEvents
+//       short-circuit keeps cron silent at idle.
+// Decision rules per event type are summarized inline so the agent
+// doesn't need to reload SKILL.md just to handle a standard A2A
+// milestone progression event.
+const CRON_MESSAGE = [
+  "Call atel_mcp action=poll_events.",
+  "",
+  "If the result has noEvents:true, stop immediately — do not summarize, do not respond.",
+  "",
+  "Otherwise process events in order (newest first). Skip any event with _receivedAt older than 5 minutes ago — those are stale catch-up events from when the runtime was offline; the originator already retried or moved on.",
+  "",
+  "Action rules per event message.kind:",
+  "- order_accepted / order_milestones_proposed → if I'm the requester, review the milestone plan; if the price + scope look right, call atel_milestone_plan_feedback approved=true; else approved=false with feedback.",
+  "- milestone_submitted → if I'm the requester, review the deliverable; if it satisfies the milestone, call atel_milestone_verify; else atel_milestone_revise with feedback.",
+  "- milestone_verified → if I'm the executor and there's a next milestone, call atel_milestone_submit for it.",
+  "- order_completed / order_settled / dispute_* → log only, no action needed.",
+  "",
+  "If unsure, log the event and stop — better to do nothing than take a wrong action."
+].join("\n");
+
 if (!has("--no-cron")) {
   const intervalSec = Number(process.env.ATEL_RELAY_CRON_INTERVAL_SEC || 30);
   const cronName = "atel-mcp-poll";
-  let existsAlready = false;
+  let existing = null;
   const listResult = tryWithRetry("cron list", () => {
     const out = execFileSync("openclaw", ["cron", "list", "--json"], { encoding: "utf-8" });
     return JSON.parse(out);
   });
   if (listResult.ok) {
     const parsed = listResult.value;
-    if (Array.isArray(parsed?.jobs) && parsed.jobs.some((j) => j.name === cronName)) {
-      existsAlready = true;
+    if (Array.isArray(parsed?.jobs)) {
+      existing = parsed.jobs.find((j) => j.name === cronName) || null;
     }
   }
   // Note: if listResult.ok is false we still fall through to add — the add
   // call will either succeed or print the manual fallback below.
 
-  if (existsAlready) {
-    console.log(`cron job '${cronName}' already present — keeping it.`);
+  // Detect whether the existing job is stale (message diverged from the
+  // current bundled prompt). If so, edit it in place. Without this,
+  // prompt improvements shipped via plugin upgrade would never reach
+  // already-installed runtimes. We use `cron edit --message` (not
+  // remove+add) so cron run history + schedule continuity are preserved.
+  let editedExisting = false;
+  if (existing) {
+    const currentMsg = existing?.payload?.message ?? "";
+    if (currentMsg !== CRON_MESSAGE) {
+      console.log(`cron job '${cronName}' message is stale (older plugin version) — patching message.`);
+      const editResult = tryWithRetry("cron edit", () => {
+        execFileSync(
+          "openclaw",
+          ["cron", "edit", existing.id, "--message", CRON_MESSAGE],
+          { stdio: "inherit" },
+        );
+      });
+      if (editResult.ok) {
+        editedExisting = true;
+        console.log(`cron job '${cronName}' message updated.`);
+      } else {
+        console.error(`warn: cron edit ${existing.id} failed; keeping old message. Run manually: openclaw cron edit ${existing.id} --message "..."`);
+        editedExisting = true; // treat as handled — we won't try cron add (would create duplicate name)
+      }
+    }
+  }
+
+  if (existing && !editedExisting) {
+    console.log(`cron job '${cronName}' already present with current message — keeping it.`);
+  } else if (existing && editedExisting) {
+    // already handled via edit — don't fall through to cron add (it would
+    // either duplicate the name or fail)
   } else {
     const addResult = tryWithRetry("cron add", () => {
       execFileSync(
@@ -211,31 +266,7 @@ if (!has("--no-cron")) {
           "--name", cronName,
           "--every", `${intervalSec}s`,
           "--session", "isolated",
-          "--message",
-          // Cron message — runs every 30s. Two cost+correctness goals:
-          // (1) inflated by 1 event per tick, the message must stay
-          //     short or input tokens explode (~15K with full ATEL
-          //     tool catalog already in scope).
-          // (2) the agent must NOT chatter about "no events"; the noEvents
-          //     short-circuit keeps cron silent at idle.
-          // Decision rules per event type are summarized inline so the
-          // agent doesn't need to reload SKILL.md just to handle a
-          // standard A2A milestone progression event.
-          [
-            "Call atel_mcp action=poll_events.",
-            "",
-            "If the result has noEvents:true, stop immediately — do not summarize, do not respond.",
-            "",
-            "Otherwise process events in order (newest first). Skip any event with _receivedAt older than 5 minutes ago — those are stale catch-up events from when the runtime was offline; the originator already retried or moved on.",
-            "",
-            "Action rules per event message.kind:",
-            "- order_accepted / order_milestones_proposed → if I'm the requester, review the milestone plan; if the price + scope look right, call atel_milestone_plan_feedback approved=true; else approved=false with feedback.",
-            "- milestone_submitted → if I'm the requester, review the deliverable; if it satisfies the milestone, call atel_milestone_verify; else atel_milestone_revise with feedback.",
-            "- milestone_verified → if I'm the executor and there's a next milestone, call atel_milestone_submit for it.",
-            "- order_completed / order_settled / dispute_* → log only, no action needed.",
-            "",
-            "If unsure, log the event and stop — better to do nothing than take a wrong action."
-          ].join("\n"),
+          "--message", CRON_MESSAGE,
           "--no-deliver",
           "--light-context",
         ],
