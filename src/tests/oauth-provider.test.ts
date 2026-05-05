@@ -177,3 +177,91 @@ test('PlatformChallengeOAuthProvider preserves the public base path in authorize
     globalThis.fetch = originalFetch;
   }
 });
+
+// PKCE round-trip pin (T9.1).
+//
+// The PlatformChallengeOAuthProvider relies on the MCP SDK's express layer
+// to validate PKCE (skipLocalPkceValidation = false). For that to work the
+// provider MUST:
+//   1. Accept params.codeChallenge in authorize()
+//   2. Persist it into the session keyed by sessionId
+//   3. Carry it through to the issued authorization-code record
+//   4. Return EXACTLY the same value from challengeForAuthorizationCode(code)
+//
+// If any of those steps regresses, PKCE silently breaks: the SDK would
+// either reject all valid verifiers (the challenge it gets back doesn't
+// match the one the client sent) or — worse, if challengeForAuthorizationCode
+// returns a placeholder — accept any verifier. This test pins the round-trip.
+test('PKCE: codeChallenge persists across authorize → token-exchange round-trip', async () => {
+  const originalFetch = globalThis.fetch;
+  let issuedCode = '';
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith('/auth/v1/challenge')) {
+      issuedCode = 'PKCE42';
+      return new Response(JSON.stringify({ code: issuedCode, expiresIn: 300 }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.endsWith(`/auth/v1/poll/${issuedCode}`)) {
+      return new Response(JSON.stringify({
+        status: 'verified',
+        token: 'tok-pkce',
+        did: 'did:atel:ed25519:tester',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const provider = new PlatformChallengeOAuthProvider(baseConfig, baseConfig.publicBaseUrl);
+    const client = await provider.clientsStore.registerClient!({
+      redirect_uris: ['https://example.com/callback'],
+      token_endpoint_auth_method: 'none',
+      client_name: 'PKCE Pin',
+      grant_types: ['authorization_code'],
+      response_types: ['code'],
+      logo_uri: undefined,
+      tos_uri: undefined,
+    });
+
+    // Same shape a real RFC 7636 client would send: 43+ char base64url string.
+    const codeChallenge = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
+    const redirects: string[] = [];
+    await provider.authorize(client, {
+      redirectUri: 'https://example.com/callback',
+      scopes: ['identity.read'],
+      codeChallenge,
+    }, {
+      redirect: (url: string) => { redirects.push(url); },
+    } as never);
+
+    const interactive = new URL(redirects[0]!);
+    const sessionId = interactive.searchParams.get('session')!;
+    const status = await provider.getLoginSessionStatus(sessionId);
+    if (status.status !== 'verified') {
+      throw new Error(`expected verified, got ${status.status}`);
+    }
+    const callbackUrl = new URL(status.redirectTo);
+    const authorizationCode = callbackUrl.searchParams.get('code')!;
+
+    // The SDK's express layer calls this before exchangeAuthorizationCode
+    // to verify the verifier locally. Our job is to return the SAME challenge
+    // we accepted at authorize() time.
+    const stored = await provider.challengeForAuthorizationCode(client, authorizationCode);
+    assert.equal(stored, codeChallenge,
+      'challengeForAuthorizationCode must return the EXACT codeChallenge from authorize() — otherwise SDK PKCE validation breaks silently');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('PKCE: skipLocalPkceValidation must remain false (SDK enforces S256)', () => {
+  // Pin the security property: provider hands PKCE validation to the SDK.
+  // Flipping this flag without also implementing server-side S256 hashing
+  // in exchangeAuthorizationCode would create a silent bypass.
+  const provider = new PlatformChallengeOAuthProvider(baseConfig, baseConfig.publicBaseUrl);
+  assert.equal(provider.skipLocalPkceValidation, false,
+    'skipLocalPkceValidation must be false — flipping it disables PKCE without a server-side replacement');
+});

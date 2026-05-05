@@ -121,6 +121,14 @@ export async function a2bSearch(
   });
 }
 
+export async function a2bCountries(ctx: ToolExecutionContext) {
+  return ctx.platform.request<unknown>({
+    method: 'GET',
+    path: PLATFORM_ENDPOINTS.a2b.countries,
+    bearerToken: ctx.session.bearerToken,
+  });
+}
+
 export async function a2bList(ctx: ToolExecutionContext, input?: { limit?: number; offset?: number }) {
   return ctx.platform.request<unknown>({
     method: 'GET',

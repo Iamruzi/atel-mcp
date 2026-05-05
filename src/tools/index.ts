@@ -47,6 +47,7 @@ export const TOOL_HANDLERS = {
   atel_audit_session_get: audit.atelAuditSessionGet,
   atel_audit_request_get: audit.atelAuditRequestGet,
   atel_a2b_search: a2b.atelA2bSearch,
+  atel_a2b_countries: a2b.atelA2bCountries,
   atel_a2b_purchase_list: a2b.atelA2bPurchaseList,
   atel_a2b_purchase_get: a2b.atelA2bPurchaseGet,
   atel_a2b_quote: a2b.atelA2bQuote,

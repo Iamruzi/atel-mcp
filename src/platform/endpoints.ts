@@ -88,6 +88,7 @@ export const PLATFORM_ENDPOINTS = {
     // funnel through this single platform call now.
     search: '/trade/v1/remote/a2b/product-search',
     quote: '/trade/v1/remote/a2b/quote-preview',
+    countries: '/trade/v1/remote/a2b/countries',
     purchase: '/trade/v1/remote/a2b/order',
     pay: (intentId: string) => `/trade/v1/remote/a2b/order/${encodeURIComponent(intentId)}/pay`,
     redemption: (intentId: string) => `/trade/v1/remote/a2b/order/${encodeURIComponent(intentId)}/redemption`,

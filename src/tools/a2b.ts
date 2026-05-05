@@ -30,6 +30,7 @@ import {
 } from '../contracts/schemas.js';
 import {
   a2bSearch,
+  a2bCountries,
   a2bDetail,
   a2bList,
   a2bRedemptionReveal,
@@ -67,6 +68,17 @@ export async function atelA2bSearch(ctx: ToolExecutionContext, input: unknown) {
     limit: A2B_SEARCH_LIMIT,
   });
   return result;
+}
+
+/**
+ * T3.4.2 — discoverable country list. Host LLM should call this BEFORE
+ * passing a country code to atel_a2b_search / atel_a2b_purchase rather
+ * than guessing. Server returns ~45 supported countries with a short
+ * cache TTL; cheap call, run liberally.
+ */
+export async function atelA2bCountries(ctx: ToolExecutionContext) {
+  requireScope(ctx, 'a2b.read');
+  return a2bCountries(ctx);
 }
 
 export async function atelA2bPurchaseList(ctx: ToolExecutionContext, input?: unknown) {
