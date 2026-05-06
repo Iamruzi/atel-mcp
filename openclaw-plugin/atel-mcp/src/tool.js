@@ -144,9 +144,16 @@ function clearPersistedToken(config, identity) {
 
 export function readPluginConfig(runtime) {
   const loaded = runtime?.config?.loadConfig?.() || {};
+  // Plugin id was renamed atel-mcp → atel-mcp-openclaw in 0.2.2 to match
+  // the npm package name. Read the canonical key first, fall back to the
+  // legacy key so installs that were never re-run keep working until the
+  // user upgrades.
+  const entries = loaded?.plugins?.entries || {};
   const entry =
-    loaded?.plugins?.entries?.["atel-mcp"]?.config ||
-    loaded?.plugins?.entries?.["atel-mcp"] ||
+    entries["atel-mcp-openclaw"]?.config ||
+    entries["atel-mcp-openclaw"] ||
+    entries["atel-mcp"]?.config ||
+    entries["atel-mcp"] ||
     {};
 
   return {

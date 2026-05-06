@@ -18,7 +18,8 @@ import { createAtelMcpTool, readPluginConfig } from "./src/tool.js";
 import { setupReverseChannel } from "./src/setup.js";
 
 const plugin = {
-  id: "atel-mcp",
+  // Must match manifest id and npm package name; OpenClaw warns on mismatch.
+  id: "atel-mcp-openclaw",
   name: "ATEL MCP",
   description: "Bridge OpenClaw to the remote ATEL MCP server",
   register(api) {
