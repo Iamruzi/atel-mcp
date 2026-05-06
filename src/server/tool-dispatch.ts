@@ -91,7 +91,16 @@ export async function dispatchTool(args: DispatchToolInput): Promise<unknown> {
   });
 
   try {
-    assertRemoteEnvironmentAllowed(ctx.session, args.config.allowCustomRemoteMcp ? ['production', 'custom'] : ['production']);
+    // Production-only by default. ALLOW_CUSTOM_REMOTE_MCP=true opens the
+    // door to local-test (which now also covers ATEL_ENV_PROFILE values
+    // development/staging/test/testing — see introspection.parseEnvironment)
+    // and 'custom' (operator-defined profile).
+    assertRemoteEnvironmentAllowed(
+      ctx.session,
+      args.config.allowCustomRemoteMcp
+        ? ['production', 'local-test', 'custom']
+        : ['production'],
+    );
     const requirements = TOOL_SCOPE_REQUIREMENTS[args.toolName];
     if (requirements) assertScopes(ctx.session, { requireAll: requirements.all, requireAny: requirements.any });
     recordDispatch(args.toolName, 'ok');
