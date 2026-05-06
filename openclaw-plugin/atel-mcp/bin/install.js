@@ -195,17 +195,20 @@ function tryWithRetry(label, fn, maxAttempts = 3, delayMs = 1000) {
 const CRON_MESSAGE = [
   "Call atel_mcp action=poll_events.",
   "",
-  "If the result has noEvents:true, stop immediately — do not summarize, do not respond.",
+  "STOP IMMEDIATELY (no response, no summary, no message to user) if ANY of:",
+  "- result.noEvents is true",
+  "- result.error is set (transient — next tick will retry)",
+  "- result.events is empty array",
+  "- all events are about orders with status in {settled, completed, cancelled, expired} (stale)",
+  "- all events have _receivedAt older than 5 minutes (stale catch-up from offline period)",
   "",
-  "Otherwise process events in order (newest first). Skip any event with _receivedAt older than 5 minutes ago — those are stale catch-up events from when the runtime was offline; the originator already retried or moved on.",
-  "",
-  "Action rules per event message.kind:",
+  "ONLY when there's at least one fresh event for an active order, take action:",
   "- order_accepted / order_milestones_proposed → if I'm the requester, review the milestone plan; if the price + scope look right, call atel_milestone_plan_feedback approved=true; else approved=false with feedback.",
   "- milestone_submitted → if I'm the requester, review the deliverable; if it satisfies the milestone, call atel_milestone_verify; else atel_milestone_revise with feedback.",
   "- milestone_verified → if I'm the executor and there's a next milestone, call atel_milestone_submit for it.",
-  "- order_completed / order_settled / dispute_* → log only, no action needed.",
+  "- order_completed / order_settled / dispute_* → log only via tool call, no announce.",
   "",
-  "If unsure, log the event and stop — better to do nothing than take a wrong action."
+  "If unsure, stop without announce — better to do nothing than spam the user."
 ].join("\n");
 
 if (!has("--no-cron")) {
@@ -267,7 +270,16 @@ if (!has("--no-cron")) {
           "--every", `${intervalSec}s`,
           "--session", "isolated",
           "--message", CRON_MESSAGE,
-          "--no-deliver",
+          // --announce makes the agent's turn output flow to the
+          // configured chat channel (Telegram default). This is what
+          // lets the user actually SEE event-driven notifications
+          // ("订单 ord-X 已接受", "milestone Y 已 verify", ...) from a
+          // background-cron-driven loop instead of them silently
+          // accumulating in inbox.jsonl. Pairs with the cron prompt's
+          // explicit "noEvents:true → stop, do not summarize" rule so
+          // idle ticks don't spam the channel.
+          "--announce",
+          "--best-effort-deliver",
           "--light-context",
         ],
         { stdio: "inherit" },
@@ -278,7 +290,7 @@ if (!has("--no-cron")) {
     } else {
       console.error(`warn: could not register cron job '${cronName}' after 3 retries. Reverse channel will not auto-trigger.`);
       console.error(`      Run manually:`);
-      console.error(`      openclaw cron add --name ${cronName} --every ${intervalSec}s --session isolated --message "Call atel_mcp action=poll_events. If noEvents:true stop, otherwise process events." --no-deliver --light-context`);
+      console.error(`      openclaw cron add --name ${cronName} --every ${intervalSec}s --session isolated --message "Call atel_mcp action=poll_events. If noEvents:true stop, otherwise process events and announce to user." --announce --best-effort-deliver --light-context`);
     }
   }
 }

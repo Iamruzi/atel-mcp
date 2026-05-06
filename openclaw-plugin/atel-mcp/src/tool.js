@@ -229,7 +229,20 @@ function resolveIdentityPath(configuredPath) {
 }
 
 async function readJson(response) {
-  return response.json().catch(async () => ({ raw: await response.text() }));
+  // Read the body ONCE as text, then try to parse. The previous shape —
+  // response.json().catch(() => response.text()) — re-reads the body in
+  // the catch path, which throws "Body has already been read" because
+  // fetch's Response body is a one-shot stream. That made every JSON
+  // parse failure (server returns HTML 502, plain-text error, etc) bubble
+  // up as "Body is unusable" instead of the actual error message,
+  // breaking the cron poll path with a confusing transient error.
+  const raw = await response.text();
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { raw };
+  }
 }
 
 async function parseMcpPayload(response) {
