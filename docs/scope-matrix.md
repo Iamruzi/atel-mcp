@@ -68,6 +68,7 @@ default-granted.
 | `atel_order_get`, `atel_order_list`, `atel_order_timeline`, `atel_milestone_list` | orders.read |
 | `atel_order_create`, `atel_order_accept`, `atel_order_complete`, `atel_order_confirm` | orders.write |
 | `atel_milestone_submit`, `atel_milestone_verify`, `atel_milestone_reject` | milestones.write |
+| `atel_milestone_plan_feedback` | orders.write |
 
 ### disputes (Tier 1+2+3)
 
@@ -81,8 +82,8 @@ default-granted.
 
 | Tool | Scope |
 |---|---|
-| `atel_a2b_search`, `atel_a2b_purchase_list`, `atel_a2b_purchase_get`, `atel_a2b_quote` | a2b.read |
-| `atel_a2b_intent_create`, `atel_a2b_lock_funds`, `atel_a2b_execute_purchase` | a2b.write |
+| `atel_a2b_search`, `atel_a2b_purchase_list`, `atel_a2b_purchase_get`, `atel_a2b_quote`, `atel_a2b_countries` | a2b.read |
+| `atel_a2b_intent_create`, `atel_a2b_lock_funds`, `atel_a2b_execute_purchase`, `atel_a2b_purchase` | a2b.write |
 
 ### fast / wallet write (Tier 3)
 
@@ -113,12 +114,16 @@ See `docs/error-codes.md` § Approval pending for the gate's full flow.
 
 ## Pre-auth tools (no scope, no auth)
 
-Two tools run BEFORE the user has any DID:
+Three tools run BEFORE the user has any DID:
 
 - `atel_register_user`: mints a new identity end-to-end
-- `atel_recover`: looks up DID by recovery code
+- `atel_recover`: looks up DID by recovery code (returns DID only)
+- `atel_secret_key_recover`: returns full secretKey for a DID via its
+  recoveryCode. Pre-auth because the caller has lost their secretKey
+  and can't sign DID-Sig — recoveryCode IS the proof. KEK-encrypted
+  backup must be on file (registered after that feature shipped).
 
-Both surface the same dispatch chain (audit, request id propagation)
+All three surface the same dispatch chain (audit, request id propagation)
 but skip session resolution entirely. The set is intentionally tiny —
 anyone can call these without a bearer token. Adding a tool to
 `PRE_AUTH_TOOLS` is a security decision (see `src/server/pre-auth.ts`).

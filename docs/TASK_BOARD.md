@@ -12,10 +12,12 @@ Done when:
 
 ### Task A2 — define scope matrix
 Owner: Role A
-Status: TODO
+Status: DONE
 Done when:
 - each MVP tool has a scope requirement
 - read/write/high-risk boundary is documented
+See: docs/scope-matrix.md (covers all 52 tools registered in
+mcp-server.ts as of 2026-05-06)
 
 ### Task B1 — implement platform client shell
 Owner: Role C
