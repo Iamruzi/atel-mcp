@@ -111,6 +111,31 @@ function buildCard(event, payload, targetDid) {
   const orderId = payload?.orderId || payload?.order_id || "";
   const tag = shortOrderTag(orderId);
   const role = recipientRole(targetDid, payload); // requester | executor | null
+
+  // P2P chat message — kind=text/general from atel_send_message. The
+  // platform pushes the message body verbatim; we surface as a card so
+  // the recipient sees it without hitting their inbox manually.
+  const kind = payload?.kind || event;
+  if (kind === "text" || kind === "general" || (event === "" && payload?.text)) {
+    const text = payload?.text || "";
+    if (text.trim()) {
+      const senderShort = (payload?.senderDid || payload?.from || "?").slice(-12);
+      return `📨 新消息（来自 …${senderShort})\n\n${text.slice(0, 500)}`;
+    }
+  }
+
+  // Inbound transfer (Fast P2P / EVM wallet_transfer). Platform pushes
+  // a transfer_received notification when balance updates land for the
+  // recipient DID.
+  if (kind === "transfer_received" || event === "transfer_received") {
+    const amount = payload?.amount || payload?.amountUsdc || "?";
+    const chain = (payload?.chain || "unknown").toUpperCase();
+    const from = payload?.fromDid || payload?.senderDid || payload?.from || "";
+    const fromShort = from ? `…${from.slice(-12)}` : "某地址";
+    const txTail = payload?.txHash ? `  tx: …${payload.txHash.slice(-10)}` : "";
+    return `💰 收到转账 ${amount} USDC（${chain} 链）\n\n来自: ${fromShort}${txTail}`;
+  }
+
   switch (event) {
     case "order_created":
       // Only the executor receives this push — fresh-offer notification.
