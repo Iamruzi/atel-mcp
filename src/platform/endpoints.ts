@@ -41,7 +41,11 @@ export const PLATFORM_ENDPOINTS = {
     // 2026-05-03 during real-runtime e2e on 龙虾1 sending a message.)
     send: '/relay/v1/send-jwt',
     poll: '/relay/v1/poll',
-    inbox: '/relay/v1/inbox',
+    // /relay/v1/inbox uses relayTokenMiddleware which only accepts
+    // RELAY_POLL_TOKEN env or DIDAuth signed body — neither available
+    // to the MCP server. /inbox-jwt mirrors the /send-jwt pattern with
+    // JWT-bearer auth (caller DID = jwt.sub).
+    inbox: '/relay/v1/inbox-jwt',
     ack: '/relay/v1/ack'
   },
   trade: {

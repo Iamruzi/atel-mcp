@@ -83,6 +83,16 @@ export function createHttpTransportApp() {
   });
 
   app.get(route('/healthz'), async (_req: Request, res: Response) => {
+    // Config summary for ops monitoring. Lists non-secret values so
+    // a misconfig (e.g. wallet.transfer scope missing in production,
+    // approval gate accidentally OFF) is visible at a glance from a
+    // simple `curl /healthz`. We never expose tokens, signing keys, or
+    // upstream credentials here.
+    const approversCount = (
+      (process.env.ATEL_MCP_APPROVERS || process.env.ATEL_MCP_OPERATOR_DIDS || '')
+        .split(',').map((s) => s.trim()).filter(Boolean).length
+    );
+    const approvalGateOn = Boolean(config.approvalLogPath) && !config.approvalBypassTools?.includes('*');
     res.json({
       ok: true,
       name: 'atel-mcp',
@@ -91,6 +101,19 @@ export function createHttpTransportApp() {
       platformBaseUrl: config.platformBaseUrl,
       publicBaseUrl: config.publicBaseUrl,
       oauthIssuerUrl: config.oauthIssuerUrl,
+      // Visible config flags — non-secret. Production deploy MUST have:
+      //   approvalGate.on=true
+      //   approvers.count > 0
+      //   defaultScopes containing wallet.* + a2b.* + dispute.* etc.
+      //   testAutoApprove=false
+      defaultScopes: config.defaultRemoteScopes,
+      approvers: { count: approversCount },
+      approvalGate: {
+        on: approvalGateOn,
+        bypassTools: config.approvalBypassTools || [],
+        testAutoApprove: config.approvalBypassTools?.includes('*') ?? false,
+      },
+      runtimeLinksEnabled: config.runtimeLinksEnabled,
     });
   });
 
@@ -117,13 +140,25 @@ export function createHttpTransportApp() {
   // that req.auth.extra.did matches:
   //   - the listing DID (list / get) — DID can only see their own queue
   //   - the approval's owner DID (cancel) — only the originator can cancel
-  //   - one of ATEL_MCP_OPERATOR_DIDS (approve / deny) — only operators
-  //     can grant approvals; the originator approving their own action
-  //     would defeat the gate
+  //   - one of ATEL_MCP_APPROVERS (approve / deny) — only approvers can
+  //     grant approvals; the originator approving their own action would
+  //     defeat the gate.
+  //
+  // Naming note (2026-05-07 cleanup): the env was originally
+  // ATEL_MCP_OPERATOR_DIDS, but "operator" was overloaded with the
+  // platform's EVM relayer wallet (ATEL_OPERATOR_PRIVATE_KEY) — two
+  // unrelated concepts shared a word. Renamed to ATEL_MCP_APPROVERS for
+  // clarity; old env still honored with a deprecation warning so existing
+  // deployments don't silently lose their approver list.
   if (config.approvalLogPath) {
     const approvalStore = createApprovalStore(config.approvalLogPath);
+    const approversNew = (process.env.ATEL_MCP_APPROVERS || '').trim();
+    const approversLegacy = (process.env.ATEL_MCP_OPERATOR_DIDS || '').trim();
+    if (!approversNew && approversLegacy) {
+      console.warn('[atel-mcp] DEPRECATED: ATEL_MCP_OPERATOR_DIDS — rename to ATEL_MCP_APPROVERS. The "operator" name conflicts with platform EVM relayer wallet (see deploy spec).');
+    }
     const operatorDids = new Set(
-      (process.env.ATEL_MCP_OPERATOR_DIDS || '')
+      (approversNew || approversLegacy)
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
@@ -225,7 +260,7 @@ export function createHttpTransportApp() {
       if (!isOperator(did)) {
         res.status(403).json({
           error: 'operator only',
-          hint: 'Only DIDs listed in ATEL_MCP_OPERATOR_DIDS can approve. The originator cannot approve their own action.',
+          hint: 'Only DIDs listed in ATEL_MCP_APPROVERS (review/approval team) can approve. The originator cannot approve their own action — that would defeat the gate.',
         });
         return;
       }

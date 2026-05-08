@@ -111,11 +111,39 @@ export const AckInputSchema = z.object({
   messageIds: z.array(z.number().int().positive()).min(1)
 });
 
+// AVIP TaskRequest envelope — must match platform's TaskRequest struct
+// (atel-platform/internal/trade/handler.go). Plugin signs this with the
+// requester's ed25519 secret key before calling atel_order_create; MCP
+// server forwards to platform unchanged (no signing here — the server
+// has no private keys). Platform verifies signature and runs AVIP v2
+// flow: Intent anchored, CompletionProof at settle.
+export const TaskRequestSchema = z.object({
+  version: z.literal(2),
+  orderId: z.string().nullable().optional(),
+  taskId: z.string().min(1),
+  requesterDid: DidSchema,
+  executorDid: DidSchema,
+  capability: z.string().min(1),
+  description: z.string().min(1),
+  payload: z.record(z.unknown()).default({}),
+  timestamp: z.string().min(1)
+});
+
 export const OrderCreateInputSchema = z.object({
   executorDid: DidSchema,
   capabilityType: z.string().min(1),
   description: z.string().min(1).max(20000),
-  priceUsdc: z.number().min(0)
+  priceUsdc: z.number().min(0),
+  // Optional AVIP fields — when ALL of them are present, platform runs
+  // the v2 path (signed TaskRequest verified, Intent stored + anchored,
+  // CompletionProof generated at settle with FULFILLED/PARTIAL/VIOLATED
+  // verdict). When absent, falls back to v0/v1 (no intent, no proof).
+  // Plugin-side helper builds + signs all three in one pass; MCP server
+  // forwards as-is (no signing here — server has no private keys).
+  version: z.literal(2).optional(),
+  taskRequest: TaskRequestSchema.optional(),
+  taskSignature: z.string().min(1).optional(),
+  intent: z.record(z.unknown()).optional()
 });
 
 export const OrderAcceptInputSchema = z.object({

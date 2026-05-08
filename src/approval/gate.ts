@@ -94,7 +94,9 @@ export async function requireApproval(
     // is intentional — production deployments MUST set approvalLogPath.
     return null;
   }
-  if (gateConfig.bypassTools?.includes(intent.toolName)) {
+  // "*" sentinel = bypass everything (set by ATEL_MCP_TEST_AUTO_APPROVE
+  // on non-production environments — config layer rejects it for prod).
+  if (gateConfig.bypassTools?.includes('*') || gateConfig.bypassTools?.includes(intent.toolName)) {
     return null;
   }
 

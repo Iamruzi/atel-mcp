@@ -370,19 +370,47 @@ export async function getOrderTimeline(ctx: ToolExecutionContext, orderId: strin
   });
 }
 
-export async function createOrder(ctx: ToolExecutionContext, input: { executorDid: string; capabilityType: string; description: string; priceUsdc: number }) {
+export async function createOrder(
+  ctx: ToolExecutionContext,
+  input: {
+    executorDid: string;
+    capabilityType: string;
+    description: string;
+    priceUsdc: number;
+    version?: number;
+    taskRequest?: unknown;
+    taskSignature?: string;
+    intent?: unknown;
+  },
+) {
+  // AVIP fields (version + taskRequest + taskSignature + intent) are
+  // forwarded as-is when present. MCP server has no private keys, so
+  // signing happens at the plugin/client layer before calling
+  // atel_order_create. When taskRequest + intent are both present,
+  // platform runs full AVIP v2: signature verification, Intent stored
+  // + anchored, CompletionProof generated at settle. When absent,
+  // falls back to v0/v1 (no proof) for backward compat.
+  const body: Record<string, unknown> = {
+    executorDid: input.executorDid,
+    capabilityType: input.capabilityType,
+    priceAmount: input.priceUsdc,
+    priceCurrency: 'USD',
+    pricingModel: 'per_task',
+    description: input.description,
+    sourceLabel: 'ATEL MCP',
+  };
+  if (input.version === 2 && input.taskRequest && input.taskSignature) {
+    body.version = 2;
+    body.taskRequest = input.taskRequest;
+    body.taskSignature = input.taskSignature;
+  }
+  if (input.intent) {
+    body.intent = input.intent;
+  }
   return ctx.platform.request<unknown>({
     method: 'POST',
     path: PLATFORM_ENDPOINTS.trade.remoteOrder,
-    body: {
-      executorDid: input.executorDid,
-      capabilityType: input.capabilityType,
-      priceAmount: input.priceUsdc,
-      priceCurrency: 'USD',
-      pricingModel: 'per_task',
-      description: input.description,
-      sourceLabel: 'ATEL MCP',
-    },
+    body,
     bearerToken: ctx.session.bearerToken,
   });
 }
