@@ -538,6 +538,7 @@ function detectTelegramBotToken() {
     path.join(home, ".bashrc"),
     path.join(home, ".profile"),
     path.join(home, ".bash_profile"),
+    path.join(openclawHome, ".env"),       // canonical OpenClaw env file
     path.join(openclawHome, "openclaw.json"),
   ];
   for (const c of candidates) {
