@@ -546,15 +546,29 @@ function parseArgs(raw) {
 }
 
 async function callRemoteTool(runtime, toolName, args) {
-  // No more LOCAL_SIGNED_TOOLS branch. Every tool — including the 5
-  // previously-bypassed ones (order_create, order_accept,
-  // milestone_submit, milestone_verify, dispute_create) — now goes
-  // through MCP server. That gives OpenClaw users access to MCP's
-  // anti-drift layer (schema enforcement, prerequisite checks, approval
-  // gate, actionable error hints) automatically.
+  // No LOCAL_SIGNED_TOOLS branch — every tool goes through MCP server's
+  // anti-drift stack. ONE local enrichment though: atel_order_create
+  // gets AVIP v2 fields (signed taskRequest) injected here, because
+  // signing requires the requester's ed25519 secret key which only the
+  // plugin has — the MCP server is a remote service with no private
+  // keys. MCP server validates the schema and forwards taskRequest +
+  // taskSignature to platform unchanged. Platform handleCreateOrder
+  // verifies the signature and runs the AVIP v2 path (Intent anchored,
+  // CompletionProof at settle).
+  let parsed = parseArgs(args);
+  if (toolName === "atel_order_create" && !parsed.taskRequest) {
+    try {
+      parsed = await augmentWithAvip(runtime, parsed);
+      console.log(`[atel-mcp] AVIP envelope built — taskId=${parsed.taskRequest?.taskId} intentId=${parsed.intent?.intentId}`);
+    } catch (e) {
+      console.warn(`[atel-mcp] AVIP signing failed (${e && e.message}); falling back to v0 order create`);
+      // Don't throw — the v0 path still works for backward compat.
+    }
+  }
+
   const result = await sendMcpRequest(runtime, "tools/call", {
     name: toolName,
-    arguments: parseArgs(args),
+    arguments: parsed,
   });
 
   return {
@@ -563,6 +577,86 @@ async function callRemoteTool(runtime, toolName, args) {
     structuredContent: result?.structuredContent ?? null,
     isError: result?.isError ?? false,
   };
+}
+
+async function augmentWithAvip(runtime, input) {
+  // Build the full AVIP envelope: signed TaskRequest + signed Intent.
+  // Mirrors atel-sdk/bin/atel.mjs:cmdOrder so MCP path is byte-equivalent
+  // to the SDK CLI (same task signing rules, same intent constraints,
+  // same delegation chain shape). Without Intent, platform skips intent
+  // creation and CompletionProof is never generated at settlement —
+  // verified by self-test of ord-ce85cb0d-ee5 (2026-05-06).
+  //
+  // CRITICAL signing rules:
+  //   TaskRequest signable: EXCLUDE orderId (null at sign time), explicit
+  //     alphabetical key order, plain JSON.stringify. Matches Go's
+  //     json.Marshal of map[string]interface{}.
+  //   Intent signable: action + constraints + issuerDid + subjectDid +
+  //     timestamp, recursively sorted via SDK's serializePayload.
+  const config = readPluginConfig(runtime);
+  const identityPath = resolveIdentityPath(config.identityPath);
+  const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+  const secretKey = decodeSecretKey(identity.secretKey);
+  const nacl = await resolveNacl(config);
+  const serializePayload = await resolveSerializePayload(config);
+
+  // ─── 1. TaskRequest ───
+  const taskId = `task-${crypto.randomBytes(12).toString("hex")}`;
+  const taskRequest = {
+    version: 2,
+    orderId: null,
+    taskId,
+    requesterDid: identity.did,
+    executorDid: input.executorDid,
+    capability: input.capabilityType,
+    description: input.description,
+    payload: { description: input.description },
+    timestamp: new Date().toISOString(),
+  };
+  const taskSignable = JSON.stringify({
+    capability: taskRequest.capability,
+    description: taskRequest.description,
+    executorDid: taskRequest.executorDid,
+    payload: taskRequest.payload,
+    requesterDid: taskRequest.requesterDid,
+    taskId: taskRequest.taskId,
+    timestamp: taskRequest.timestamp,
+    version: taskRequest.version,
+  });
+  const taskSignature = Buffer.from(
+    nacl.sign.detached(Buffer.from(taskSignable), secretKey),
+  ).toString("base64");
+
+  // ─── 2. Intent ───
+  const intentTimestamp = new Date().toISOString();
+  const intentConstraints = {
+    maxAmount: input.priceUsdc,
+    milestoneCount: 5,
+  };
+  const intentSignable = serializePayload({
+    action: "execute_task",
+    constraints: intentConstraints,
+    issuerDid: identity.did,
+    subjectDid: input.executorDid,
+    timestamp: intentTimestamp,
+  });
+  const intentSig = Buffer.from(
+    nacl.sign.detached(Buffer.from(intentSignable), secretKey),
+  ).toString("base64");
+  const intent = {
+    intentId: "intent_" + crypto.randomUUID(),
+    issuerDid: identity.did,
+    subjectDid: input.executorDid,
+    action: "execute_task",
+    constraints: intentConstraints,
+    delegationChain: [
+      { from: identity.did, to: input.executorDid, attenuated: true, signature: intentSig },
+    ],
+    timestamp: intentTimestamp,
+    signature: intentSig,
+  };
+
+  return { ...input, version: 2, taskRequest, taskSignature, intent };
 }
 
 export function createAtelMcpTool(runtime) {

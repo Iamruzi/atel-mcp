@@ -8,6 +8,7 @@
 // is one-shot (no retry loop) — if port is taken once, treat as pull mode.
 
 import { startListener } from "./listener.js";
+import { startHeartbeat } from "./heartbeat.js";
 // Lazy-import tool.js to avoid the tool.js ↔ setup.js cycle. tool.js
 // imports getMode() from setup.js at module load time; if we statically
 // imported tool.js here we'd race the partial-module hazard.
@@ -54,6 +55,120 @@ async function callRegisterEndpoint(runtime, url) {
   });
 }
 
+async function ensureAgentName(runtime) {
+  // Friendly agent name pushed to platform's agents.name on every plugin
+  // start. Idempotent — atel_agent_register is INSERT ... ON CONFLICT
+  // UPDATE on platform side.
+  //
+  // Source of truth (priority order):
+  //   1. ATEL_AGENT_NAME env var (override for headless / CI)
+  //   2. <extensionDir>/atel-state.json (.name field — modern, atomic)
+  //   3. <extensionDir>/agent-name.txt (legacy single-file)
+  let name = process.env.ATEL_AGENT_NAME || "";
+  if (!name) {
+    try {
+      const fsMod = await import("node:fs");
+      const pathMod = await import("node:path");
+      const { fileURLToPath } = await import("node:url");
+      const here = pathMod.dirname(fileURLToPath(import.meta.url));
+      const stateFile = pathMod.resolve(here, "..", "atel-state.json");
+      if (fsMod.existsSync(stateFile)) {
+        const st = JSON.parse(fsMod.readFileSync(stateFile, "utf8"));
+        if (typeof st?.name === "string" && st.name.trim()) name = st.name.trim();
+      }
+      if (!name) {
+        const namePath = pathMod.resolve(here, "..", "agent-name.txt");
+        if (fsMod.existsSync(namePath)) {
+          name = fsMod.readFileSync(namePath, "utf8").trim();
+        }
+      }
+    } catch { /* fall through */ }
+  }
+  if (!name) return;
+  // atel_agent_register schema requires capabilities (>=1). For an
+  // OpenClaw agent we don't always know the right capability list — but
+  // we DO want to preserve whatever is already registered. Strategy:
+  //   1. read current registration via atel_whoami / agent search
+  //   2. if missing, default to ["coding"] (the OpenClaw default agent)
+  //   3. send name + existing capabilities
+  // Capability resolution priority:
+  //   1. atel-state.json (.capabilities — modern, atomic)
+  //   2. agent-capabilities.txt (legacy)
+  //   3. existing platform record (preserve what's there)
+  //   4. ["coding"] (legacy default — wrong for non-engineers)
+  let existingCaps = ["coding"];
+  let capsFromInstaller = false;
+  try {
+    const fsMod = await import("node:fs");
+    const pathMod = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = pathMod.dirname(fileURLToPath(import.meta.url));
+    const stateFile = pathMod.resolve(here, "..", "atel-state.json");
+    if (fsMod.existsSync(stateFile)) {
+      const st = JSON.parse(fsMod.readFileSync(stateFile, "utf8"));
+      if (Array.isArray(st?.capabilities) && st.capabilities.length) {
+        existingCaps = st.capabilities.filter((s) => typeof s === "string" && s);
+        if (existingCaps.length) capsFromInstaller = true;
+      }
+    }
+    if (!capsFromInstaller) {
+      const capsPath = pathMod.resolve(here, "..", "agent-capabilities.txt");
+      if (fsMod.existsSync(capsPath)) {
+        const declared = fsMod.readFileSync(capsPath, "utf8").trim().split(",").map((s) => s.trim()).filter(Boolean);
+        if (declared.length) {
+          existingCaps = declared;
+          capsFromInstaller = true;
+        }
+      }
+    }
+  } catch { /* fall through to platform-record fallback */ }
+  let existingDesc;
+  try {
+    const whoami = await _sendMcpRequestForRuntime(runtime, "tools/call", { name: "atel_whoami", arguments: {} });
+    const txt = whoami?.content?.[0]?.text;
+    if (txt) {
+      const me = JSON.parse(txt);
+      const did = me?.did;
+      if (did) {
+        const search = await _sendMcpRequestForRuntime(runtime, "tools/call", { name: "atel_agent_search", arguments: { query: did } });
+        const stxt = search?.content?.[0]?.text;
+        if (stxt) {
+          const sj = JSON.parse(stxt);
+          const found = (sj?.agents || []).find((a) => a.did === did);
+          if (found) {
+            // Only inherit platform's caps when installer didn't declare any —
+            // otherwise the operator's explicit `--capabilities` flag would
+            // be silently overridden on every gateway start, which defeats
+            // the purpose of letting them configure caps at install time.
+            if (!capsFromInstaller && Array.isArray(found.capabilities) && found.capabilities.length) {
+              existingCaps = found.capabilities.map((c) => typeof c === "string" ? c : c?.type).filter(Boolean);
+              if (!existingCaps.length) existingCaps = ["coding"];
+            }
+            if (typeof found.description === "string") existingDesc = found.description;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // Best-effort: if discovery fails, fall back to capabilities=["coding"].
+  }
+  try {
+    const args = { name, capabilities: existingCaps };
+    if (existingDesc) args.description = existingDesc;
+    const result = await _sendMcpRequestForRuntime(runtime, "tools/call", {
+      name: "atel_agent_register",
+      arguments: args,
+    });
+    if (result?.isError) {
+      console.warn(`[atel-mcp/setup] agent_register name='${name}' failed: ${JSON.stringify(result).slice(0, 200)}`);
+    } else {
+      console.log(`[atel-mcp/setup] agent registered as '${name}' (caps=${existingCaps.join(",")})`);
+    }
+  } catch (err) {
+    console.warn(`[atel-mcp/setup] agent_register threw: ${err && err.message}`);
+  }
+}
+
 export async function setupReverseChannel(runtime, config) {
   const port = Number(config.relayListenPort || 3101);
   const host = config.relayListenHost || "0.0.0.0";
@@ -75,37 +190,75 @@ export async function setupReverseChannel(runtime, config) {
     if (err && err.code === "EADDRINUSE") {
       console.log(`[atel-mcp/setup] listener already bound by another process (likely the gateway) — using shared file-backed inbox`);
       pluginMode = "push";
+      // Heartbeat is per-process (each gateway/agent fork has its own
+      // identity copy). Even when the listener is owned by the gateway
+      // we still want this fork to keep the agent online by hitting
+      // /registry/v1/heartbeat itself — multiple heartbeats are
+      // harmless (UPSERT semantics on platform side).
+      startHeartbeat({
+        platformBaseUrl: config.platformBaseUrl,
+        identityPath: config.identityPath,
+        intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
+      });
+      // Don't await — agent_register is best-effort; we don't want to
+      // block the agent fork's setup() on a remote round-trip.
+      ensureAgentName(runtime).catch(() => {});
       return { mode: "push", reason: "listener_owned_by_gateway" };
     }
     console.warn(`[atel-mcp/setup] listener bind failed (${err && err.message}) — falling back to pull mode`);
     pluginMode = "pull";
+    // Heartbeat is independent of listener — even in pull mode we need
+    // to keep the agent online so platform routes orders to us.
+    startHeartbeat({
+      platformBaseUrl: config.platformBaseUrl,
+      identityPath: config.identityPath,
+      intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
+    });
+    ensureAgentName(runtime).catch(() => {});
     return { mode: "pull", reason: `bind_failed: ${err && err.message}` };
   }
+
+  // Listener bound successfully — start the heartbeat alongside.
+  startHeartbeat({
+    platformBaseUrl: config.platformBaseUrl,
+    identityPath: config.identityPath,
+    intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
+  });
 
   // Step 2: detect a publicly reachable URL.
   const url = await detectPublicUrl(config, port);
   if (!url) {
     console.warn("[atel-mcp/setup] could not detect public URL — falling back to pull mode (listener still running but unreachable)");
     pluginMode = "pull";
+    // Still push the friendly name to platform — name registration is
+    // independent of whether the agent has a reachable push endpoint.
+    ensureAgentName(runtime).catch(() => {});
     return { mode: "pull", reason: "no_public_url" };
   }
 
   // Step 3: register endpoint with platform. If the platform reachability
   // probe fails (e.g. firewall blocks 3101 inbound), the platform will
   // return an error and we fall back to pull mode.
+  let endpointOk = false;
   try {
     const result = await callRegisterEndpoint(runtime, url);
     if (result?.isError) {
       console.warn(`[atel-mcp/setup] register_endpoint failed: ${JSON.stringify(result)} — falling back to pull mode`);
       pluginMode = "pull";
-      return { mode: "pull", reason: "register_endpoint_failed", url };
+    } else {
+      console.log(`[atel-mcp/setup] reverse channel armed (push mode) — endpoint=${url}`);
+      pluginMode = "push";
+      endpointOk = true;
     }
-    console.log(`[atel-mcp/setup] reverse channel armed (push mode) — endpoint=${url}`);
-    pluginMode = "push";
-    return { mode: "push", url };
   } catch (err) {
     console.warn(`[atel-mcp/setup] register_endpoint threw (${err && err.message}) — falling back to pull mode`);
     pluginMode = "pull";
-    return { mode: "pull", reason: `register_endpoint_error: ${err && err.message}` };
   }
+
+  // Step 4: push friendly agent name to platform regardless of push/pull
+  // mode — the name is independent of endpoint reachability.
+  await ensureAgentName(runtime);
+
+  if (endpointOk) return { mode: "push", url };
+  return { mode: "pull", reason: "register_endpoint_failed_or_threw", url };
 }

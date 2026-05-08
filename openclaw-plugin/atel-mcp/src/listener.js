@@ -13,7 +13,81 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 import { pushEvent } from "./inbox.js";
+import { dispatchEvent } from "./tg-dispatch.js";
+
+const _here = path.dirname(fileURLToPath(import.meta.url));
+
+// Coalesce burst push notifications into one cron wake within a 1s
+// window. Avoids spawning openclaw cron run for every event when the
+// platform retries or fires a tight stream of milestone events.
+let pendingWakeTimer = null;
+let cachedJobId = null;
+
+function readMcpPollJobId() {
+  if (cachedJobId) return cachedJobId;
+  try {
+    const home = process.env.HOME || "/root";
+    const p = path.join(home, ".openclaw", "cron", "jobs.json");
+    if (!fs.existsSync(p)) return null;
+    const d = JSON.parse(fs.readFileSync(p, "utf8"));
+    const job = (d.jobs || []).find((j) => j.name === "atel-mcp-poll");
+    if (job && job.id) {
+      cachedJobId = job.id;
+      return cachedJobId;
+    }
+  } catch {}
+  return null;
+}
+
+function wakeCronNow() {
+  // Coalesce: if multiple pushes arrive within 1s, fire one cron wake.
+  //
+  // Method: bump the atel-mcp-poll job's `nextRunAtMs` in jobs.json to
+  // "now". The gateway's cron scheduler watches that file and re-reads
+  // when fields change, so this triggers an immediate run on the next
+  // scheduler tick (typically <1s). We tried `openclaw cron run <id>`
+  // first but the CLI tries to connect to the gateway WebSocket and
+  // fails ("gateway closed") on this setup, so jobs.json mutation is
+  // the reliable in-process path.
+  if (pendingWakeTimer) return;
+  pendingWakeTimer = setTimeout(() => {
+    pendingWakeTimer = null;
+    try {
+      const home = process.env.HOME || "/root";
+      const p = path.join(home, ".openclaw", "cron", "jobs.json");
+      if (!fs.existsSync(p)) {
+        console.warn("[atel-mcp/listener] wake skipped — jobs.json not found");
+        return;
+      }
+      const d = JSON.parse(fs.readFileSync(p, "utf8"));
+      const job = (d.jobs || []).find((j) => j.name === "atel-mcp-poll");
+      if (!job) {
+        console.warn("[atel-mcp/listener] wake skipped — atel-mcp-poll job not in jobs.json");
+        return;
+      }
+      const wasNext = job.state?.nextRunAtMs;
+      const now = Date.now();
+      // Only bump if next run is meaningfully in the future (>2s) —
+      // otherwise we'd be racing a scheduler that's already about to
+      // fire, and our write+rewrite churn is wasted I/O.
+      if (typeof wasNext === "number" && wasNext - now < 2000) {
+        return;
+      }
+      if (!job.state) job.state = {};
+      job.state.nextRunAtMs = now;
+      job.updatedAtMs = now;
+      fs.writeFileSync(p, JSON.stringify(d, null, 2));
+      console.log(`[atel-mcp/listener] wake — bumped nextRunAtMs (was ${wasNext ? Math.round((wasNext - now) / 1000) + "s away" : "unset"})`);
+    } catch (e) {
+      console.warn(`[atel-mcp/listener] wake error: ${e && e.message}`);
+    }
+  }, 1000);
+}
 
 let serverInstance = null;
 
@@ -108,6 +182,23 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
           message: messageBody,
         };
         pushEvent(did, event);
+        // Format and send the canonical TG card for this event without
+        // waiting for the cron-driven agent to react. Agent's job is
+        // pure state mutation; this dispatch is pure notification. No
+        // LLM in the loop here — output is deterministic. We pass
+        // target_did so dispatch can choose role-aware wording (e.g.
+        // executor receives "你已接受订单", requester receives
+        // "订单已被接受").
+        dispatchEvent(messageBody, { extensionDir: _here, targetDid: did }).catch((e) => {
+          console.warn("[atel-mcp/listener] tg dispatch error:", e && e.message);
+        });
+        // Push-driven cron wake: fire openclaw cron run for the
+        // atel-mcp-poll job so the agent processes this event NOW,
+        // instead of waiting up to 30s for the next scheduled tick.
+        // Coalesced: bursts within 1s fire one wake. Saves 0-30s per
+        // state transition (e.g. M0 verified → M1 submit was
+        // bottlenecked by cron interval prior to this).
+        wakeCronNow();
         res.statusCode = 200;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ ok: true, queued: true }));
