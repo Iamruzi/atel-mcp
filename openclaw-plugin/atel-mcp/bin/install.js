@@ -144,9 +144,15 @@ if (subcommand === "wash") {
 
   // 1. Stop gateway (best-effort — service may not be installed under user
   //    units). Kill any lingering openclaw helpers from previous installs
-  //    so they release Telegram getUpdates / file locks.
+  //    so they release Telegram getUpdates / file locks. Also stop +
+  //    disable the dedicated listener unit so the next install starts
+  //    from clean state (we'll rewrite + re-enable it).
+  try { execFileSync("systemctl", ["--user", "stop", "atel-mcp-listener.service"], { stdio: "ignore" }); } catch {}
+  try { execFileSync("systemctl", ["--user", "disable", "atel-mcp-listener.service"], { stdio: "ignore" }); } catch {}
+  try { fs.rmSync(path.join(home, ".config", "systemd", "user", "atel-mcp-listener.service"), { force: true }); } catch {}
+  try { execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "ignore" }); } catch {}
   try { execFileSync("systemctl", ["--user", "stop", "openclaw-gateway"], { stdio: "ignore" }); } catch {}
-  for (const pat of ["openclaw-cron", "node bin/install.js"]) {
+  for (const pat of ["openclaw-cron", "node bin/install.js", "atel-listener-main"]) {
     spawnSync("pkill", ["-9", "-f", pat], { stdio: "ignore" });
   }
   // Don't pkill bare "openclaw" — that would also kill openclaw-gateway,
@@ -503,6 +509,91 @@ fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 //      restart will surface it cleanly.
 // Operator can still run `openclaw doctor` manually if they want a
 // holistic config check.
+
+// ─── Listener as a dedicated systemd --user unit ─────────────────────
+//
+// Why dedicated unit instead of in-process startListener() inside the
+// gateway register() hook (the 0.4/0.5 design):
+//   * In-process bind silently swallows EADDRINUSE on every gateway
+//     restart, leaving the lobster in pull mode with no operator signal.
+//   * Listener died with the gateway — any gateway crash window meant
+//     pushes were lost.
+//   * Multiple plugin generations (gateway fork + agent forks) raced for
+//     port 3101.
+// A standalone systemd --user unit fixes all three: own crash domain
+// with Restart=always, observable via `systemctl --user status`, and
+// decoupled from gateway lifecycle. SDK + official-bot users had this
+// equivalent (long-running poller process) — MCP path now matches.
+function detectTelegramBotToken() {
+  // OpenClaw's openclaw.json stores `${TELEGRAM_BOT_TOKEN}` as a
+  // placeholder; the real token sits in env (loaded by gateway from
+  // ~/.bashrc on its systemd start) OR in OpenClaw's secret store. We
+  // try env first (cheapest), then a couple of known on-disk locations.
+  const envTok = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
+  if (envTok && /^\d{8,}:[A-Za-z0-9_-]{30,}$/.test(envTok)) return envTok;
+  // Scan ~/.bashrc and openclaw home for a TG-shaped token. The pattern
+  // is bot-id (8-12 digits) + colon + 30+ chars of base64url. False
+  // positives are negligible at that length.
+  const candidates = [
+    path.join(home, ".bashrc"),
+    path.join(home, ".profile"),
+    path.join(home, ".bash_profile"),
+    path.join(openclawHome, "openclaw.json"),
+  ];
+  for (const c of candidates) {
+    try {
+      if (!fs.existsSync(c)) continue;
+      const body = fs.readFileSync(c, "utf8");
+      const m = body.match(/\b(\d{8,12}:[A-Za-z0-9_-]{30,})\b/);
+      if (m) return m[1];
+    } catch {}
+  }
+  return "";
+}
+const SYSTEMD_USER_DIR = path.join(home, ".config", "systemd", "user");
+const SYSTEMD_UNIT_FILE = path.join(SYSTEMD_USER_DIR, "atel-mcp-listener.service");
+try {
+  fs.mkdirSync(SYSTEMD_USER_DIR, { recursive: true });
+  fs.mkdirSync(path.join(openclawHome, "logs"), { recursive: true });
+  const nodeBin = process.execPath;
+  const listenerEntry = path.join(extensionDir, "src", "listener-main.js");
+  const tgToken = detectTelegramBotToken();
+  const tgEnvLine = tgToken ? `Environment=TELEGRAM_BOT_TOKEN=${tgToken}\n` : "";
+  if (!tgToken) {
+    console.warn("warn: TELEGRAM_BOT_TOKEN not auto-detected. Add `Environment=TELEGRAM_BOT_TOKEN=<your-token>` to ~/.config/systemd/user/atel-mcp-listener.service if push notifications stay silent.");
+  }
+  const unitText = `[Unit]
+Description=ATEL MCP plugin listener (platform push receiver)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${extensionDir}
+Environment=ATEL_PLATFORM_BASE_URL=${platformBaseUrl}
+Environment=ATEL_IDENTITY_PATH=${identityPath}
+${tgEnvLine}ExecStart=${nodeBin} ${listenerEntry}
+Restart=always
+RestartSec=3
+StandardOutput=append:${path.join(openclawHome, "logs", "atel-mcp-listener.log")}
+StandardError=append:${path.join(openclawHome, "logs", "atel-mcp-listener.log")}
+
+[Install]
+WantedBy=default.target
+`;
+  fs.writeFileSync(SYSTEMD_UNIT_FILE, unitText);
+  // Free the port before (re)starting in case a stale 0.4/0.5 in-process
+  // listener still holds 3101 — otherwise systemd's start fails with
+  // EADDRINUSE and silently retries forever.
+  try { execFileSync("fuser", ["-k", "-9", "-n", "tcp", "3101"], { stdio: "ignore" }); } catch {}
+  try { execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "ignore" }); } catch {}
+  try { execFileSync("systemctl", ["--user", "enable", "atel-mcp-listener.service"], { stdio: "ignore" }); } catch {}
+  try { execFileSync("systemctl", ["--user", "restart", "atel-mcp-listener.service"], { stdio: "ignore" }); } catch (e) {
+    console.warn(`warn: could not (re)start atel-mcp-listener.service: ${e && e.message}. Run manually: systemctl --user restart atel-mcp-listener`);
+  }
+  console.log(`atel-mcp-listener.service installed + enabled + started (logs: ~/.openclaw/logs/atel-mcp-listener.log)`);
+} catch (e) {
+  console.warn(`warn: could not install systemd listener unit: ${e && e.message}. Plugin still functional in pull mode but transfer_received / P2P chat cards won't dispatch to TG.`);
+}
 
 if (!has("--no-restart")) {
   // Restart in 5 seconds, detached, so install.js can finish first.

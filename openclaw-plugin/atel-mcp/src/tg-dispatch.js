@@ -119,21 +119,33 @@ function buildCard(event, payload, targetDid) {
   if (kind === "text" || kind === "general" || (event === "" && payload?.text)) {
     const text = payload?.text || "";
     if (text.trim()) {
-      const senderShort = (payload?.senderDid || payload?.from || "?").slice(-12);
-      return `📨 新消息（来自 …${senderShort})\n\n${text.slice(0, 500)}`;
+      // Sender-name resolution mirrors the SDK / official-bot path:
+      // prefer the friendly name platform attaches as `from_name`, fall
+      // back to a DID tail. Showing "…<12-char tail>" is unfriendly when
+      // a real label is available.
+      const senderName = payload?.from_name || payload?.fromName;
+      const senderDid = payload?.from_did || payload?.fromDid || payload?.senderDid || payload?.from || "";
+      const senderLabel = senderName || (senderDid ? `…${senderDid.slice(-12)}` : "?");
+      return `📨 新消息（来自 ${senderLabel})\n\n${text.slice(0, 500)}`;
     }
   }
 
   // Inbound transfer (Fast P2P / EVM wallet_transfer). Platform pushes
   // a transfer_received notification when balance updates land for the
-  // recipient DID.
+  // recipient DID. Field names match SDK / official-bot path: snake_case
+  // (`from_name`, `from_did`, `tx_hash`) — that's what platform's
+  // notifyAgent emits, see internal/trade/handler.go.
   if (kind === "transfer_received" || event === "transfer_received") {
-    const amount = payload?.amount || payload?.amountUsdc || "?";
+    const amount = payload?.amount ?? payload?.amountUsdc ?? "?";
     const chain = (payload?.chain || "unknown").toUpperCase();
-    const from = payload?.fromDid || payload?.senderDid || payload?.from || "";
-    const fromShort = from ? `…${from.slice(-12)}` : "某地址";
-    const txTail = payload?.txHash ? `  tx: …${payload.txHash.slice(-10)}` : "";
-    return `💰 收到转账 ${amount} USDC（${chain} 链）\n\n来自: ${fromShort}${txTail}`;
+    const fromName = payload?.from_name || payload?.fromName;
+    const fromDid = payload?.from_did || payload?.fromDid || payload?.senderDid || payload?.from || "";
+    const fromLabel = fromName || (fromDid ? `…${fromDid.slice(-12)}` : "某地址");
+    // Show full tx hash on its own line — truncating the tail loses the
+    // ability to copy it into a block explorer. Long is fine in TG.
+    const tx = payload?.tx_hash || payload?.txHash;
+    const txLine = tx ? `\ntx: ${tx}` : "";
+    return `💰 收到转账 ${amount} USDC（${chain} 链）\n\n来自: ${fromLabel}${txLine}`;
   }
 
   switch (event) {
@@ -216,7 +228,18 @@ export async function dispatchEvent(messageBody, opts) {
 
   // Dedup: platform retries on push failure. Same dedupeKey within 5
   // minutes → skip (we already sent a card).
-  const dedupe = messageBody?.dedupeKey || `${eventType}:${payload?.orderId}:${payload?.milestoneIndex ?? ""}`;
+  //
+  // Important: platform sometimes ships a degenerate dedupeKey like
+  // ":transfer_received" (empty orderId prefix because transfer events
+  // have no order). That collapses every consecutive transfer into one
+  // card per 5 minutes — wrong; user wants a card per transfer. Detect
+  // that shape and fall back to a per-event unique key built from the
+  // tx hash / event id.
+  let dedupe = messageBody?.dedupeKey || `${eventType}:${payload?.orderId}:${payload?.milestoneIndex ?? ""}`;
+  if (dedupe.startsWith(":") || dedupe === "") {
+    const txKey = payload?.tx_hash || payload?.txHash || messageBody?.eventId || messageBody?.body?.eventId || String(Date.now());
+    dedupe = `${eventType}:${txKey}`;
+  }
   const now = Date.now();
   const seen = recentDispatches.get(dedupe);
   if (seen && now - seen < 300_000) return;

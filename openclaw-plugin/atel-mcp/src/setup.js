@@ -171,61 +171,17 @@ async function ensureAgentName(runtime) {
 
 export async function setupReverseChannel(runtime, config) {
   const port = Number(config.relayListenPort || 3101);
-  const host = config.relayListenHost || "0.0.0.0";
-  const hmacSecret = config.relayHmacSecret || process.env.ATEL_RELAY_HMAC_SECRET || null;
+  // 0.6.0+: listener + heartbeat run as a dedicated systemd --user unit
+  // (atel-mcp-listener.service, installed by bin/install.js). This
+  // function no longer spawns either in-process. We only push the agent
+  // identity to platform and register the public endpoint. Side benefit:
+  // the gateway/agent fork distinction (which was the root cause of the
+  // 0.4/0.5 "EADDRINUSE → silent pull mode" bug) becomes irrelevant —
+  // every fork's setupReverseChannel() simply (re-)registers the same
+  // endpoint with platform.
+  pluginMode = "push";
 
-  // Step 1: try to bind the listener.
-  //
-  // Important: OpenClaw plugins are loaded in TWO process contexts:
-  //   1. The long-running gateway (where bind succeeds first)
-  //   2. Each isolated agent turn (a fresh child process)
-  // The 2nd context's setup will see EADDRINUSE because the gateway
-  // already owns the port. That is FINE — push mode is still active
-  // (the gateway-side listener writes to the file-backed inbox; the
-  // agent's poll_events tool reads from it). We treat EADDRINUSE as
-  // "push mode is alive in another process" instead of falling back.
-  try {
-    await startListener({ host, port, hmacSecret });
-  } catch (err) {
-    if (err && err.code === "EADDRINUSE") {
-      console.log(`[atel-mcp/setup] listener already bound by another process (likely the gateway) — using shared file-backed inbox`);
-      pluginMode = "push";
-      // Heartbeat is per-process (each gateway/agent fork has its own
-      // identity copy). Even when the listener is owned by the gateway
-      // we still want this fork to keep the agent online by hitting
-      // /registry/v1/heartbeat itself — multiple heartbeats are
-      // harmless (UPSERT semantics on platform side).
-      startHeartbeat({
-        platformBaseUrl: config.platformBaseUrl,
-        identityPath: config.identityPath,
-        intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
-      });
-      // Don't await — agent_register is best-effort; we don't want to
-      // block the agent fork's setup() on a remote round-trip.
-      ensureAgentName(runtime).catch(() => {});
-      return { mode: "push", reason: "listener_owned_by_gateway" };
-    }
-    console.warn(`[atel-mcp/setup] listener bind failed (${err && err.message}) — falling back to pull mode`);
-    pluginMode = "pull";
-    // Heartbeat is independent of listener — even in pull mode we need
-    // to keep the agent online so platform routes orders to us.
-    startHeartbeat({
-      platformBaseUrl: config.platformBaseUrl,
-      identityPath: config.identityPath,
-      intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
-    });
-    ensureAgentName(runtime).catch(() => {});
-    return { mode: "pull", reason: `bind_failed: ${err && err.message}` };
-  }
-
-  // Listener bound successfully — start the heartbeat alongside.
-  startHeartbeat({
-    platformBaseUrl: config.platformBaseUrl,
-    identityPath: config.identityPath,
-    intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
-  });
-
-  // Step 2: push friendly agent name (atel_agent_register) FIRST. Platform
+  // Step 1: push friendly agent name (atel_agent_register) FIRST. Platform
   // creates the agent row with a placeholder endpoint (mcp://remote/<did>)
   // when this is the agent's first registration. We deliberately do this
   // BEFORE register_endpoint so the next step's real URL ends up as the
@@ -233,7 +189,7 @@ export async function setupReverseChannel(runtime, config) {
   // would clobber a freshly-registered endpoint with the placeholder.
   await ensureAgentName(runtime);
 
-  // Step 3: detect a publicly reachable URL.
+  // Step 2: detect a publicly reachable URL.
   const url = await detectPublicUrl(config, port);
   if (!url) {
     console.warn("[atel-mcp/setup] could not detect public URL — falling back to pull mode (listener still running but unreachable)");
@@ -241,7 +197,7 @@ export async function setupReverseChannel(runtime, config) {
     return { mode: "pull", reason: "no_public_url" };
   }
 
-  // Step 4: register the real endpoint with platform, overwriting the
+  // Step 3: register the real endpoint with platform, overwriting the
   // placeholder set by agent_register. If platform's reachability probe
   // fails (e.g. ufw blocks 3101 inbound) the call returns isError and we
   // fall back to pull mode (listener still running, just not reachable).
