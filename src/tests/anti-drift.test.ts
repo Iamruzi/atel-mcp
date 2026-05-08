@@ -22,7 +22,6 @@ import { atelWalletTransfer } from '../tools/wallet.js';
 import { atelOrderCreate } from '../tools/order.js';
 import { atelMilestoneSubmit, atelMilestoneVerify } from '../tools/milestone.js';
 import { atelSendMessage } from '../tools/messaging.js';
-import { _resetApprovalStoreCache } from '../approval/gate.js';
 import { AtelMcpError } from '../contracts/errors.js';
 import type { ToolExecutionContext } from '../server/context.js';
 
@@ -41,8 +40,6 @@ interface MockCtxOptions {
   did?: string;
   scopes?: string[];
   responder?: MockResponder;
-  approvalLogPath?: string;
-  approvalBypassTools?: string[];
 }
 
 function makeCtx(opts: MockCtxOptions = {}): ToolExecutionContext {
@@ -72,10 +69,7 @@ function makeCtx(opts: MockCtxOptions = {}): ToolExecutionContext {
       environment: 'production',
       bearerToken: 'mock-bearer',
     },
-    config: {
-      approvalLogPath: opts.approvalLogPath,
-      approvalBypassTools: opts.approvalBypassTools ?? ['atel_wallet_transfer', 'atel_fast_transfer'],
-    },
+    config: {},
     platform,
     executionPlan: { selectedBackend: 'platform-hosted' },
     emitAudit: async () => {},
@@ -450,43 +444,3 @@ test('anti-drift: a2b_lock_funds requires base wallet (Fast-only user gets clear
   );
 });
 
-// ─── 17. wallet_transfer + approval gate end-to-end ─────────────────────
-
-test('anti-drift: wallet_transfer with approval gate enabled throws APPROVAL_PENDING first', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'atel-mcp-anti-drift-'));
-  const path = join(dir, 'approvals.jsonl');
-  _resetApprovalStoreCache();
-  const ctx = makeCtx({
-    scopes: ['wallet.transfer'],
-    approvalLogPath: path,
-    // No bypass — gate is fully active for this test.
-    approvalBypassTools: [],
-    responder: (req) => {
-      if (req.path === '/account/v1/balance') {
-        return {
-          chainAddresses: { base: '0xaaa' },
-          chainBalances: { base: 100 },
-        };
-      }
-      return null;
-    },
-  });
-  await assert.rejects(
-    () => atelWalletTransfer(ctx, {
-      chain: 'base',
-      address: '0x' + 'b'.repeat(40),
-      amount: 1,
-    }),
-    (err: unknown) => {
-      assert.ok(err instanceof AtelMcpError);
-      assert.equal(err.code, 'APPROVAL_PENDING');
-      const details = err.details as { approvalId?: string; summary?: string };
-      assert.match(details.approvalId ?? '', /^appr-/);
-      assert.match(details.summary ?? '', /1 USDC.*BASE/i);
-      return true;
-    },
-  );
-  // The chain spend must NOT have happened — only the balance read.
-  const paths = callsOf(ctx).map((c) => c.path);
-  assert.ok(!paths.includes('/trade/v1/wallet/withdraw'), 'withdraw must not be called before approval');
-});

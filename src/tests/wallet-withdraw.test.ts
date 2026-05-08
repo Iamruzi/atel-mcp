@@ -1,20 +1,14 @@
 /**
  * Pin atel_wallet_withdraw behavior — the highest-risk write tool.
  *
- * Two failure modes we MUST guard against:
- *   1. Schema slips a wrong-format address through (e.g. 0x EVM address
- *      with chain=fast) → on-chain revert OR worse, funds sent to a
- *      mis-derived address.
- *   2. Approval gate skipped → unauthorized withdrawal succeeds.
+ * Failure mode we MUST guard against: schema slips a wrong-format
+ * address through (e.g. 0x EVM address with chain=fast) → on-chain
+ * revert OR worse, funds sent to a mis-derived address.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { atelWalletWithdraw } from '../tools/wallet.js';
-import { _resetApprovalStoreCache } from '../approval/gate.js';
 import { AtelMcpError } from '../contracts/errors.js';
 import type { ToolExecutionContext } from '../server/context.js';
 
@@ -25,8 +19,6 @@ interface MockReq {
 }
 
 function makeCtx(opts: {
-  approvalLogPath?: string;
-  approvalBypassTools?: string[];
   scopes?: string[];
   responder?: (req: MockReq) => unknown;
 }) {
@@ -40,10 +32,7 @@ function makeCtx(opts: {
       environment: 'production',
       bearerToken: 'tok',
     },
-    config: {
-      approvalLogPath: opts.approvalLogPath,
-      approvalBypassTools: opts.approvalBypassTools ?? ['atel_wallet_withdraw'],
-    },
+    config: {},
     platform: {
       request: async (req: MockReq) => {
         calls.push(req);
@@ -166,45 +155,10 @@ test('wallet_withdraw: insufficientBalance returns hint with chain alternative',
   );
 });
 
-// ─── Approval gate is mandatory (NO threshold opt-out) ──────────────
+// ─── Happy path: scope passes + balance OK + platform forwarded ─────
 
-test('wallet_withdraw: with approval gate ON, ALWAYS triggers APPROVAL_PENDING (no threshold)', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'atel-mcp-withdraw-'));
-  const path = join(dir, 'approvals.jsonl');
-  _resetApprovalStoreCache();
+test('wallet_withdraw: forwards to platform /trade/v1/wallet/withdraw-jwt', async () => {
   const ctx = makeCtx({
-    approvalLogPath: path,
-    approvalBypassTools: [], // no bypass — real gate behavior
-    responder: (req) => {
-      if (req.path === '/account/v1/balance') return { chainAddresses: { base: '0xaaa' }, chainBalances: { base: 100 } };
-      return null;
-    },
-  });
-  // Even tiny amount (0.001 USDC) MUST trigger gate. Withdrawal is the
-  // highest-risk path; "small amounts skip the gate" would be the wrong
-  // optimization here.
-  await assert.rejects(
-    () => atelWalletWithdraw(ctx, { chain: 'base', address: goodEvmAddr, amount: 0.001 }),
-    (err: unknown) => {
-      assert.ok(err instanceof AtelMcpError);
-      assert.equal(err.code, 'APPROVAL_PENDING');
-      const details = err.details as { summary?: string };
-      // Summary must surface "EXTERNAL WITHDRAWAL" so reviewing operator
-      // sees the risk classification at a glance.
-      assert.match(details.summary ?? '', /EXTERNAL WITHDRAWAL/);
-      return true;
-    },
-  );
-  // Critical: the platform withdraw call must NOT have happened.
-  const paths = callsOf(ctx).map((c) => c.path);
-  assert.ok(!paths.includes('/trade/v1/wallet/withdraw-jwt'), 'withdraw must not be called before approval');
-});
-
-// ─── Happy path (with bypass for direct platform call test) ─────────
-
-test('wallet_withdraw: with bypass enabled, forwards to platform /trade/v1/wallet/withdraw-jwt', async () => {
-  const ctx = makeCtx({
-    // bypassTools includes atel_wallet_withdraw by default in makeCtx
     responder: (req) => {
       if (req.path === '/account/v1/balance') return { chainAddresses: { base: '0xaaa' }, chainBalances: { base: 100 } };
       if (req.path === '/trade/v1/wallet/withdraw-jwt') return { txHash: '0xdeadbeef', status: 'submitted' };

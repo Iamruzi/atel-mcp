@@ -342,8 +342,6 @@ export const FastTransferInputSchema = z.object({
 // - address must be EVM 0x-prefixed 40-char hex. Schema rejects 64-char
 //   Fast hex format and bech32.
 // - amount is USDC decimal, capped at 10000.
-// - GATED behind approval gate (see src/approval/). High-risk scope alone
-//   is not enough — every action requires per-action operator approval.
 
 const EvmAddressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'EVM address must be 0x-prefixed 40-char hex');
 
@@ -360,8 +358,6 @@ export const WalletTransferInputSchema = z.object({
 // - Withdraw assumes the recipient is OUTSIDE the ATEL ecosystem
 //   (cold storage, external CEX, personal wallet). transfer is for
 //   ATEL-internal P2P movement.
-// - Approval gate triggers on EVERY amount (no threshold) — withdraw is
-//   the highest-risk path because the funds leave ATEL custody for good.
 // - Anti-drift: handler warns if the address actually IS a known ATEL
 //   agent (probable host LLM mistake — meant transfer).
 // - Address format validated per chain (EVM 0x for base/bsc, raw 64-hex

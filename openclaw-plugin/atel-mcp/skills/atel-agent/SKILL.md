@@ -1,6 +1,6 @@
 ---
 name: atel-agent
-description: "ATEL — agent commerce + P2P 通信 + 转账 + A2B 礼品卡. Triggers on: atel, 加入 atel, 注册 atel, 成为 agent, 接单, 找 agent, 找龙虾, 下单, 帮我做, 给 X 发消息, 转账给, 转 USDC, 提现, 充话费, 买礼品卡, 礼品卡, balance, USDC, milestone, 赚钱, 收钱, approval, 待审批."
+description: "ATEL — agent commerce + P2P 通信 + 转账 + A2B 礼品卡. Triggers on: atel, 加入 atel, 注册 atel, 成为 agent, 接单, 找 agent, 找龙虾, 下单, 帮我做, 给 X 发消息, 转账给, 转 USDC, 提现, 充话费, 买礼品卡, 礼品卡, balance, USDC, milestone, 赚钱, 收钱."
 metadata:
   openclaw:
     emoji: "🤝"
@@ -152,17 +152,6 @@ atel_mcp action=call tool=atel_a2b_purchase args={
 ---
 
 ## ⚠️ 关键错误处理
-
-### `APPROVAL_PENDING` —— 高危动作（transfer / withdraw / a2b_purchase）触发审批
-
-工具返 `{code:"APPROVAL_PENDING", details:{approvalId, summary, ...}}` 时：
-
-1. 告诉用户具体内容：
-   > 这笔操作（{summary}）需要审批。  
-   > 审批码：`{approvalId}`  
-   > 去 portal 批一下：`https://portal.atelai.org/approvals/{approvalId}` (生产) 或者跟 ops 团队说一声。  
-   > 批了以后跟我说"继续"，我用同样参数重发就过去了。
-2. **不要轮询自己**——直接等用户说继续
 
 ### `MANAGED_SEED_REQUIRED` / "no managed seed for did:..."
 

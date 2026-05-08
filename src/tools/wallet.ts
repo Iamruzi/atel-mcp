@@ -1,10 +1,6 @@
 /**
- * Wallet tools.
- *
- * Read tools (balance, deposit_info) — wallet.read scope, no fund movement.
- * Write tools (transfer) — wallet.transfer scope AND per-action approval
- * gate (see src/approval/). Two-factor: scope = "host may attempt",
- * approval = "user OK'd this specific action".
+ * Wallet tools. Read tools (balance, deposit_info) use wallet.read scope;
+ * write tools (transfer, withdraw) use wallet.transfer / wallet.withdraw.
  */
 
 import { WalletTransferInputSchema, WalletWithdrawInputSchema } from '../contracts/schemas.js';
@@ -14,7 +10,6 @@ import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
 import { assertPrerequisite } from '../auth/guards.js';
 import { walletReady, sufficientBalance } from '../auth/prerequisites.js';
-import { requireApproval } from '../approval/gate.js';
 
 export async function atelBalance(ctx: ToolExecutionContext) {
   requireScope(ctx, 'wallet.read');
@@ -141,12 +136,6 @@ export async function atelWalletStatus(ctx: ToolExecutionContext) {
  * EVM (base / bsc) USDC transfer. Chain MUST be specified — there is no
  * default because guessing the chain on a 0x address would be a silent
  * cross-chain mistake.
- *
- * Approval gate is mandatory: even with wallet.transfer scope, the host
- * must wait for an out-of-band operator approval per action. The host LLM
- * gets APPROVAL_PENDING with the approval id; user approves via dashboard
- * or `npm run approval:approve <id>`; host retries; gate consumes the
- * approval (one-shot) and proceeds.
  */
 export async function atelWalletTransfer(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'wallet.transfer');
@@ -154,24 +143,6 @@ export async function atelWalletTransfer(ctx: ToolExecutionContext, input: unkno
 
   await assertPrerequisite(ctx.session, () => walletReady(ctx, parsed.chain));
   await assertPrerequisite(ctx.session, () => sufficientBalance(ctx, parsed.chain, parsed.amount));
-
-  await requireApproval(
-    ctx,
-    {
-      action: 'wallet.transfer',
-      toolName: 'atel_wallet_transfer',
-      intentParams: {
-        chain: parsed.chain,
-        address: parsed.address.toLowerCase(),
-        amount: parsed.amount,
-      },
-      summary: `Transfer ${parsed.amount} USDC on ${parsed.chain.toUpperCase()} to ${parsed.address}${parsed.memo ? ` (memo: ${parsed.memo})` : ''}`,
-    },
-    {
-      approvalLogPath: ctx.config.approvalLogPath,
-      bypassTools: ctx.config.approvalBypassTools,
-    },
-  );
 
   const result = await walletWithdraw(ctx, {
     chain: parsed.chain,
@@ -202,23 +173,11 @@ export async function atelWalletTransfer(ctx: ToolExecutionContext, input: unkno
  *
  * vs atel_wallet_transfer:
  *   - Supports base / bsc / fast (transfer is EVM-only).
- *   - Approval gate triggers on EVERY amount (no threshold) — no
- *     "small amounts skip the gate" optimization. Withdrawal is
- *     irreversible and goes to non-ATEL parties; we require explicit
- *     operator approval every time.
  *   - Address format validated per chain (discriminated union schema).
  *
- * Anti-drift:
- *   - Schema's discriminated union catches the cross-chain address-format
- *     drift case (caller passing a 0x EVM address with chain=fast).
- *   - Approval summary explicitly says "external withdrawal" so the
- *     operator reviewing the queue sees the risk classification at a
- *     glance and won't approve thinking it's an internal transfer.
- *
- * NOTE: future commit will warn if `address` is a known ATEL agent's
- * smart wallet (probable host LLM mistake — should have called
- * atel_wallet_transfer instead). Requires a new platform endpoint to
- * look up agents by chain+address; tracked separately.
+ * Anti-drift: schema's discriminated union catches the cross-chain
+ * address-format drift case (caller passing a 0x EVM address with
+ * chain=fast).
  */
 export async function atelWalletWithdraw(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'wallet.withdraw');
@@ -226,27 +185,6 @@ export async function atelWalletWithdraw(ctx: ToolExecutionContext, input: unkno
 
   await assertPrerequisite(ctx.session, () => walletReady(ctx, parsed.chain));
   await assertPrerequisite(ctx.session, () => sufficientBalance(ctx, parsed.chain, parsed.amount));
-
-  // Approval gate. UNLIKE wallet_transfer (which can have an opt-out
-  // threshold), withdraw always requires per-action approval — funds
-  // leave ATEL forever, every action deserves human review.
-  await requireApproval(
-    ctx,
-    {
-      action: 'wallet.withdraw',
-      toolName: 'atel_wallet_withdraw',
-      intentParams: {
-        chain: parsed.chain,
-        address: parsed.address.toLowerCase(),
-        amount: parsed.amount,
-      },
-      summary: `EXTERNAL WITHDRAWAL: ${parsed.amount} USDC on ${parsed.chain.toUpperCase()} → ${parsed.address}${parsed.memo ? ` (memo: ${parsed.memo})` : ''}`,
-    },
-    {
-      approvalLogPath: ctx.config.approvalLogPath,
-      bypassTools: ctx.config.approvalBypassTools,
-    },
-  );
 
   const result = await walletWithdraw(ctx, {
     chain: parsed.chain,

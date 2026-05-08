@@ -40,8 +40,6 @@ export interface AtelMcpConfig {
   auditPlatformReadEnabled: boolean;
   /** Identifier for this MCP instance — used by platform de-dup if MCP runs HA. */
   mcpInstance: string;
-  approvalLogPath?: string;
-  approvalBypassTools?: string[];
   /**
    * Whether the runtime-links subsystem is wired into dispatch.
    *
@@ -136,28 +134,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     auditPlatformIngestToken: env.ATEL_MCP_AUDIT_PLATFORM_INGEST_TOKEN?.trim() || undefined,
     auditPlatformReadEnabled: env.ATEL_MCP_AUDIT_PLATFORM_READ?.trim().toLowerCase() === 'true',
     mcpInstance: env.ATEL_MCP_INSTANCE_ID?.trim() || env.HOSTNAME?.trim() || `${host}:${port}`,
-    approvalLogPath: env.ATEL_MCP_APPROVAL_LOG_PATH?.trim() || undefined,
-    // ATEL_MCP_APPROVAL_BYPASS_TOOLS is one mechanism to skip approval gate
-    // per-tool. ATEL_MCP_TEST_AUTO_APPROVE (below) is the global one — it
-    // unsets approvalLogPath entirely, which makes requireApproval() in
-    // src/approval/gate.ts return early. ONLY honored on non-production
-    // environments to prevent accidental prod deployment with the gate
-    // disabled.
-    approvalBypassTools: (() => {
-      const explicitBypass = parseCsvList(env.ATEL_MCP_APPROVAL_BYPASS_TOOLS, []);
-      const wantAutoApprove = env.ATEL_MCP_TEST_AUTO_APPROVE?.trim().toLowerCase() === 'true';
-      if (!wantAutoApprove) return explicitBypass;
-      if (environment === 'production') {
-        // Hard fail-safe: production never auto-approves. Log loudly so
-        // ops sees the misconfig but don't crash the server.
-        console.warn('[atel-mcp] ATEL_MCP_TEST_AUTO_APPROVE=true ignored — production environment forces gate ENABLED.');
-        return explicitBypass;
-      }
-      console.warn(`[atel-mcp] ATEL_MCP_TEST_AUTO_APPROVE=true (env=${environment}) — ALL tools bypass approval gate. NEVER set this in production.`);
-      // Sentinel "*" understood by gate: bypass everything. (gate.ts must
-      // check for "*" alongside per-tool list.)
-      return ['*'];
-    })(),
     // Default true. ATEL_MCP_RUNTIME_LINKS_ENABLED=false only on MCP hosts
     // that don't serve OpenClaw / 龙虾 users (a small minority).
     runtimeLinksEnabled: env.ATEL_MCP_RUNTIME_LINKS_ENABLED?.trim().toLowerCase() !== 'false',

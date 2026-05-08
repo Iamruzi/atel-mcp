@@ -8,8 +8,8 @@
  *   2. write      — mutate state but reversible / no real fund movement
  *   3. high_risk  — irreversible / real fund movement (transfer/withdraw/arbitrate)
  *
- * High-risk scopes are NEVER granted by default. They require explicit user
- * grant + an approval gate (see src/approval/) before execution.
+ * Per the "自然语言=意图，Agent 直接执行" product principle, granted
+ * scopes execute directly with no per-action confirmation step.
  */
 export type AtelScope =
   // Read scopes
@@ -90,6 +90,4 @@ export const TOOL_SCOPE_REQUIREMENTS: Record<string, { all?: AtelScope[]; any?: 
   atel_fast_transfer: { all: ['wallet.transfer'] },
   atel_wallet_transfer: { all: ['wallet.transfer'] },
   atel_wallet_withdraw: { all: ['wallet.withdraw'] },
-  atel_approval_list: { all: ['wallet.read'] },
-  atel_approval_get: { all: ['wallet.read'] },
 };

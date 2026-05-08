@@ -45,9 +45,9 @@ function asToolResult(data: unknown) {
 /**
  * Wrap a tool invocation so that AtelMcpError throws surface as STRUCTURED
  * tool errors. Without this, the MCP SDK's default createToolError() keeps
- * only error.message and drops .code, .details (e.g. approval id, intent
- * hash, hint, prereq fix steps) — which is exactly the actionable payload
- * the host LLM needs to recover.
+ * only error.message and drops .code, .details (intent hash, hint, prereq
+ * fix steps) — which is exactly the actionable payload the host LLM needs
+ * to recover.
  *
  * Structure (must stay backward-compatible with happy-path tool results
  * that already use { content: [{type:'text', text: JSON-string}] }):
@@ -56,9 +56,6 @@ function asToolResult(data: unknown) {
  *     content: [{ type: 'text', text: <pretty-json of {code, message, details, hint}> }],
  *     isError: true
  *   }
- *
- * Discovered 2026-05-03 during scenario testing: APPROVAL_PENDING gate
- * was firing but the host had no way to extract the approval id.
  */
 async function tryInvoke(invoke: (toolName: string, input?: unknown) => Promise<unknown>, toolName: string, input?: unknown) {
   try {
@@ -170,11 +167,9 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_a2b_execute_purchase', { description: 'Execute the Bitrefill purchase (createInvoice + pay). Run only after atel_a2b_lock_funds succeeded. Poll atel_a2b_purchase_get for redemption code once status=DELIVERED.', inputSchema: A2bExecutePurchaseInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_a2b_execute_purchase', input));
   server.registerTool('atel_fast_balance', { description: 'Read your Fast Network USDC balance + Fast hex address. Returns null balance if platform balance response omits chainBalances.fast (known gap).' }, async () => tryInvoke(invoke, 'atel_fast_balance'));
   server.registerTool('atel_fast_deposit_address', { description: 'Return your Fast Network deposit address (64-char hex = ed25519 pubkey). bech32 / 0x prefixes are NOT valid on Fast.' }, async () => tryInvoke(invoke, 'atel_fast_deposit_address'));
-  server.registerTool('atel_fast_transfer', { description: 'Direct USDC P2P transfer on Fast Network (no escrow). Recipient accepts did:atel:ed25519:... DID OR 64-char hex pubkey. amount is USDC decimal. High-risk; requires wallet.transfer scope + per-action operator approval.', inputSchema: FastTransferInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_fast_transfer', input));
-  server.registerTool('atel_wallet_transfer', { description: 'EVM USDC transfer (chain=base|bsc). Address is 0x-prefixed 40-char hex; amount is USDC decimal. High-risk; requires wallet.transfer scope + per-action operator approval (out-of-band, not LLM-grantable).', inputSchema: WalletTransferInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_wallet_transfer', input));
-  server.registerTool('atel_wallet_withdraw', { description: 'EXTERNAL withdrawal to a non-ATEL wallet (chain=base|bsc|fast). EVM addresses are 0x..40 hex, Fast addresses are 64-char raw hex. Highest risk: irreversible, leaves ATEL custody. Requires wallet.withdraw scope + ALWAYS triggers per-action operator approval (no threshold).', inputSchema: WalletWithdrawInputSchema }, async (input) => tryInvoke(invoke, 'atel_wallet_withdraw', input));
-  server.registerTool('atel_approval_list', { description: 'List your pending and approved high-risk action approvals. Use to check whether your filed action is ready to retry.' }, async () => tryInvoke(invoke, 'atel_approval_list'));
-  server.registerTool('atel_approval_get', { description: 'Get one approval record by id. Returns 404 if id belongs to another DID.', inputSchema: { id: z.string().min(1).startsWith('appr-') } }, async (input) => tryInvoke(invoke, 'atel_approval_get', input));
+  server.registerTool('atel_fast_transfer', { description: 'Direct USDC P2P transfer on Fast Network (no escrow). Recipient accepts did:atel:ed25519:... DID OR 64-char hex pubkey. amount is USDC decimal. Requires wallet.transfer scope.', inputSchema: FastTransferInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_fast_transfer', input));
+  server.registerTool('atel_wallet_transfer', { description: 'EVM USDC transfer (chain=base|bsc). Address is 0x-prefixed 40-char hex; amount is USDC decimal. Requires wallet.transfer scope.', inputSchema: WalletTransferInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_wallet_transfer', input));
+  server.registerTool('atel_wallet_withdraw', { description: 'EXTERNAL withdrawal to a non-ATEL wallet (chain=base|bsc|fast). EVM addresses are 0x..40 hex, Fast addresses are 64-char raw hex. Irreversible, leaves ATEL custody. Requires wallet.withdraw scope.', inputSchema: WalletWithdrawInputSchema }, async (input) => tryInvoke(invoke, 'atel_wallet_withdraw', input));
 
   return server;
 }

@@ -7,7 +7,6 @@ import * as dispute from './dispute.js';
 import * as audit from './audit.js';
 import * as a2b from './a2b.js';
 import * as fast from './fast.js';
-import * as approval from './approval.js';
 
 export const TOOL_HANDLERS = {
   atel_whoami: identity.atelWhoami,
@@ -60,8 +59,6 @@ export const TOOL_HANDLERS = {
   atel_fast_transfer: fast.atelFastTransfer,
   atel_wallet_transfer: wallet.atelWalletTransfer,
   atel_wallet_withdraw: wallet.atelWalletWithdraw,
-  atel_approval_list: approval.atelApprovalList,
-  atel_approval_get: approval.atelApprovalGet,
 } as const;
 
 export type ToolName = keyof typeof TOOL_HANDLERS;
