@@ -167,7 +167,10 @@ function buildCard(event, payload, targetDid) {
     case "milestone_submitted": {
       // Only the requester receives this push (they need to verify).
       const idx = payload?.milestoneIndex ?? payload?.index ?? "?";
-      const body = previewContent(payload?.resultSummary || payload?.deliverable || payload?.content, 250);
+      // 3500 chars matches atel-tg-bot relay-poller fix (commit 17d0a4f) —
+      // 250 was too short to show real deliverables (code review, docs, etc).
+      // TG message limit is 4096; reserve ~500 for header/order line/ellipsis.
+      const body = previewContent(payload?.resultSummary || payload?.deliverable || payload?.content, 3500);
       return `${tag} 📋 里程碑 #${idx} 已提交\n\n订单: ${orderId}\n内容:\n${body}`;
     }
     case "milestone_verified": {
