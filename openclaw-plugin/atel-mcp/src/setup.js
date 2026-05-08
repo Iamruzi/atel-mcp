@@ -225,20 +225,26 @@ export async function setupReverseChannel(runtime, config) {
     intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
   });
 
-  // Step 2: detect a publicly reachable URL.
+  // Step 2: push friendly agent name (atel_agent_register) FIRST. Platform
+  // creates the agent row with a placeholder endpoint (mcp://remote/<did>)
+  // when this is the agent's first registration. We deliberately do this
+  // BEFORE register_endpoint so the next step's real URL ends up as the
+  // final write — avoids a write-then-overwrite race where agent_register
+  // would clobber a freshly-registered endpoint with the placeholder.
+  await ensureAgentName(runtime);
+
+  // Step 3: detect a publicly reachable URL.
   const url = await detectPublicUrl(config, port);
   if (!url) {
     console.warn("[atel-mcp/setup] could not detect public URL — falling back to pull mode (listener still running but unreachable)");
     pluginMode = "pull";
-    // Still push the friendly name to platform — name registration is
-    // independent of whether the agent has a reachable push endpoint.
-    ensureAgentName(runtime).catch(() => {});
     return { mode: "pull", reason: "no_public_url" };
   }
 
-  // Step 3: register endpoint with platform. If the platform reachability
-  // probe fails (e.g. firewall blocks 3101 inbound), the platform will
-  // return an error and we fall back to pull mode.
+  // Step 4: register the real endpoint with platform, overwriting the
+  // placeholder set by agent_register. If platform's reachability probe
+  // fails (e.g. ufw blocks 3101 inbound) the call returns isError and we
+  // fall back to pull mode (listener still running, just not reachable).
   let endpointOk = false;
   try {
     const result = await callRegisterEndpoint(runtime, url);
@@ -254,10 +260,6 @@ export async function setupReverseChannel(runtime, config) {
     console.warn(`[atel-mcp/setup] register_endpoint threw (${err && err.message}) — falling back to pull mode`);
     pluginMode = "pull";
   }
-
-  // Step 4: push friendly agent name to platform regardless of push/pull
-  // mode — the name is independent of endpoint reachability.
-  await ensureAgentName(runtime);
 
   if (endpointOk) return { mode: "push", url };
   return { mode: "pull", reason: "register_endpoint_failed_or_threw", url };
