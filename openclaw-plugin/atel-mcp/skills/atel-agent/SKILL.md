@@ -127,6 +127,16 @@ atel_mcp action=call tool=atel_wallet_withdraw args={"chain":"base"|"bsc"|"fast"
 
 `atel_mcp action=call tool=atel_balance` 总余额；`atel_fast_balance` 单查 Fast。直接复述返回。
 
+### Dashboard 网页登录（用户说 "atel auth XXXXXX" 或类似）
+
+用户打开 https://atelai.xyz/login 看到 6 字符授权码（如 `VX42WY`），可能贴给你或说 "atel auth VX42WY" / "授权码 VX42WY" / "帮我登录 dashboard 用 VX42WY"。
+
+直接调本地 dashboard_auth action（不走远端 MCP）：
+```
+atel_mcp action=dashboard_auth code="VX42WY"
+```
+成功后用户的浏览器会自动跳转到 /dashboard。返回 ok=false 时按 hint 处理（code 过期/已用/签名失败让用户重新刷新 /login 拿新 code）。
+
 ### A2B：买礼品卡 / 充话费（Bitrefill）
 
 用户说"我想买亚马逊礼品卡 10 美金"：

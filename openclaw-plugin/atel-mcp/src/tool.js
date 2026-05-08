@@ -276,6 +276,66 @@ async function parseMcpPayload(response) {
   throw new Error(`Unable to parse MCP response: ${raw.slice(0, 500)}`);
 }
 
+// ─── Dashboard authorization (atel auth <code>) ──────────────────────
+// Verifies a 6-char auth code minted by atel-portal /login by signing
+// it with the lobster's identity. After success the dashboard's
+// browser-side poll completes and the user lands on /dashboard
+// authenticated as this DID.
+
+async function dashboardAuth(config, code) {
+  const trimmed = String(code || "").trim().toUpperCase();
+  if (!trimmed || !/^[A-Z0-9]{4,12}$/.test(trimmed)) {
+    return {
+      ok: false,
+      error: "INVALID_CODE_FORMAT",
+      message: "code must be 4-12 alphanumeric characters (e.g. VX42WY)",
+    };
+  }
+
+  const identityPath = resolveIdentityPath(config.identityPath);
+  const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+  const secretKey = decodeSecretKey(identity.secretKey);
+  const serializePayload = await resolveSerializePayload(config);
+  const nacl = await resolveNacl(config);
+
+  const timestamp = new Date().toISOString();
+  // Signing format MUST match atel-sdk CLI `atel auth <code>` — server
+  // re-marshals body fields (code, did, timestamp) into payloadRaw and
+  // expects the signature over serializePayload({payload, did, timestamp}).
+  const payload = { code: trimmed, did: identity.did, timestamp };
+  const signable = serializePayload({ payload, did: identity.did, timestamp });
+  const signature = Buffer.from(nacl.sign.detached(Buffer.from(signable), secretKey)).toString("base64");
+
+  const response = await fetch(`${config.platformBaseUrl}/auth/v1/verify`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: trimmed, did: identity.did, signature, timestamp }),
+  });
+  const body = await readJson(response);
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: body?.error || `verify_failed_${response.status}`,
+      status: response.status,
+      hint: response.status === 404
+        ? "code not found — make sure the code came from atelai.xyz/login and is fresh (5min window)"
+        : response.status === 410
+          ? "code expired — open atelai.xyz/login again to mint a new one"
+          : response.status === 409
+            ? "code already used — open atelai.xyz/login again to mint a new one"
+            : response.status === 401
+              ? "signature invalid — try again with same code; if persists, identity drift"
+              : null,
+    };
+  }
+  return {
+    ok: true,
+    did: identity.did,
+    name: body?.name,
+    message: `Dashboard authorized for DID ${identity.did}. Browser /login page should now redirect to /dashboard within 2s.`,
+  };
+}
+
 // ─── DID-Sig auth ─────────────────────────────────────────────────────
 
 async function exchangeDidSigForToken(config) {
@@ -674,8 +734,8 @@ export function createAtelMcpTool(runtime) {
       properties: {
         action: {
           type: "string",
-          enum: ["list", "call", "poll_events"],
-          description: "list = enumerate remote tools; call = invoke one remote tool; poll_events = drain pending platform notifications",
+          enum: ["list", "call", "poll_events", "dashboard_auth"],
+          description: "list = enumerate remote tools; call = invoke one remote tool; poll_events = drain pending platform notifications; dashboard_auth = authorize a Dashboard /login code (the 6-char code shown on atelai.xyz/login)",
         },
         tool: {
           type: "string",
@@ -684,6 +744,10 @@ export function createAtelMcpTool(runtime) {
         args: {
           type: ["object", "string"],
           description: "Remote ATEL MCP tool arguments as object or JSON string",
+        },
+        code: {
+          type: "string",
+          description: "Dashboard auth code when action=dashboard_auth (e.g. 'VX42WY')",
         },
       },
       required: ["action"],
@@ -702,6 +766,14 @@ export function createAtelMcpTool(runtime) {
         }
         if (action === "poll_events") {
           return textResult(await pollEvents(runtime));
+        }
+        if (action === "dashboard_auth") {
+          if (!params?.code || typeof params.code !== "string") {
+            return textResult({ error: "code is required when action=dashboard_auth (e.g. 'VX42WY')" }, true);
+          }
+          const config = readPluginConfig(runtime);
+          const result = await dashboardAuth(config, params.code);
+          return textResult(result, !result.ok);
         }
         return textResult({ error: `unsupported action: ${String(action)}` }, true);
       } catch (error) {
