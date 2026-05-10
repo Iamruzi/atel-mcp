@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { pushEvent } from "./inbox.js";
 import { dispatchEvent } from "./tg-dispatch.js";
+import { autoActOnPushEvent } from "./poll-loop.js";
 
 const _here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,7 +45,7 @@ function readMcpPollJobId() {
   return null;
 }
 
-function wakeCronNow() {
+export function wakeCronNow() {
   // Coalesce: if multiple pushes arrive within 1s, fire one cron wake.
   //
   // Method: bump the atel-mcp-poll job's `nextRunAtMs` in jobs.json to
@@ -91,7 +92,7 @@ function wakeCronNow() {
 
 let serverInstance = null;
 
-export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret = null }) {
+export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret = null, platformBaseUrl = null, identityPath = null }) {
   const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/health") {
       res.statusCode = 200;
@@ -192,12 +193,22 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
         dispatchEvent(messageBody, { extensionDir: _here, targetDid: did }).catch((e) => {
           console.warn("[atel-mcp/listener] tg dispatch error:", e && e.message);
         });
+        // 0.6.17 fix R10: also fire hardcoded autoAct on push-route events.
+        // Pre-0.6.17, autoActOnEvent only ran in poll-loop's pull path —
+        // when platform's push to listener succeeded the event was ack'd
+        // immediately and poll-loop never re-pulled it, so order_created /
+        // order_accepted hardcoded auto-accept / auto-approve-plan never
+        // fired. Manifested as orders stuck in "created" / "milestone_review"
+        // for any plugin whose listener was reachable from platform.
+        const dispatchInput = messageBody?.body && typeof messageBody.body === "object"
+          ? messageBody.body
+          : messageBody;
+        autoActOnPushEvent({ platformBaseUrl, identityPath, dispatchInput }).catch((e) => {
+          console.warn("[atel-mcp/listener] push autoAct error:", e && e.message);
+        });
         // Push-driven cron wake: fire openclaw cron run for the
         // atel-mcp-poll job so the agent processes this event NOW,
         // instead of waiting up to 30s for the next scheduled tick.
-        // Coalesced: bursts within 1s fire one wake. Saves 0-30s per
-        // state transition (e.g. M0 verified → M1 submit was
-        // bottlenecked by cron interval prior to this).
         wakeCronNow();
         res.statusCode = 200;
         res.setHeader("content-type", "application/json");

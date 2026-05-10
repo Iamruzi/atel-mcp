@@ -1,5 +1,11 @@
 {
   "id": "atel-mcp-openclaw",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["atel_mcp"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

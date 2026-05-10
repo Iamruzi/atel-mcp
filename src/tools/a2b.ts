@@ -139,12 +139,16 @@ export async function atelA2bPurchaseGet(ctx: ToolExecutionContext, input: unkno
   // shows the policy decision (and the LLM gets a clear actionable hint).
   const status = String(detail.status ?? detail.contract_status ?? '').toUpperCase();
   let redemption: unknown = null;
+  let revealOk = false;
   if (status === 'DELIVERED' || status === 'FULFILLED') {
     try {
       redemption = await a2bRedemptionReveal(ctx, parsed.intentId);
+      revealOk = true;
     } catch (e) {
-      // Code reveal failed (e.g. caller is not the issuer). Surface as null
-      // with a hint in metadata.
+      // Code reveal failed (e.g. caller is not the issuer). Surface as
+      // an error object on the tool result so the LLM can see why, but
+      // mark the audit metadata as hasRedemption=false so audit truth
+      // doesn't claim we delivered a code when we didn't.
       redemption = { error: 'reveal_failed', message: (e as Error).message };
     }
   }
@@ -155,7 +159,7 @@ export async function atelA2bPurchaseGet(ctx: ToolExecutionContext, input: unkno
     status: 'ok',
     entityType: 'order',
     entityId: parsed.intentId,
-    metadata: { intentStatus: status, hasRedemption: redemption !== null },
+    metadata: { intentStatus: status, hasRedemption: revealOk },
   });
 
   return { ...detail, redemption };

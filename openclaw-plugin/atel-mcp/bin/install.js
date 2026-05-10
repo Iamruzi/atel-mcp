@@ -30,6 +30,95 @@ function firstFile(candidates) {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) || "";
 }
 
+// Detect whether the local OpenClaw runtime supports the `mcp.servers`
+// config key (introduced in 2026.5.x). Older runtimes (2026.2.25,
+// 2026.3.13 verified) hard-reject the whole openclaw.json with
+// "Unrecognized key: mcp" at gateway start, which is much worse than
+// just not having the native MCP path — it kills the gateway entirely.
+//
+// Subtlety: when this script runs under `npx atel-mcp-openclaw@<v>`,
+// npx may install openclaw (peerDep with a wide range) into its own
+// temp dir and prepend that dir's node_modules/.bin to PATH. A naive
+// `openclaw --version` in that subprocess hits the npx-local copy
+// (e.g. 2026.5.7) instead of the user's runtime (e.g. 2026.2.25),
+// which gives a false "supported" answer and writes a config the
+// real gateway will reject.
+//
+// So we resolve the runtime version the same way the gateway does:
+//   1. Read `npm root -g`, look for openclaw/package.json there.
+//   2. Fall back to `openclaw --version` but with our npx-local bin
+//      and any node_modules/.bin pruned from PATH.
+//
+// Override: ATEL_FORCE_MCP_SERVERS=1 forces the supported path (for
+// development / patched builds whose version string doesn't match).
+const MIN_MCP_SERVERS_VERSION = { year: 2026, month: 5 };
+function detectMcpServersSupport() {
+  if (process.env.ATEL_FORCE_MCP_SERVERS === "1") {
+    return { supported: true, version: "forced", reason: "ATEL_FORCE_MCP_SERVERS=1" };
+  }
+
+  let version = "";
+  let probedFrom = "";
+
+  // 1. Resolve via global npm root — this is where the gateway lives
+  //    (verified on 龙虾甲/乙: gateway uses /usr/lib/node_modules/openclaw,
+  //    which is exactly `npm root -g`).
+  try {
+    const npmRoot = execFileSync("npm", ["root", "-g"], { stdio: ["ignore", "pipe", "pipe"], timeout: 5000 }).toString().trim();
+    const pjPath = path.join(npmRoot, "openclaw", "package.json");
+    if (fs.existsSync(pjPath)) {
+      const pj = JSON.parse(fs.readFileSync(pjPath, "utf8"));
+      if (pj.version) {
+        version = pj.version;
+        probedFrom = pjPath;
+      }
+    }
+  } catch { /* fall through to PATH lookup */ }
+
+  // 2. Fallback: spawn openclaw with PATH stripped of npx and local
+  //    node_modules/.bin — those would shadow the global runtime
+  //    binary inside an npx subprocess.
+  if (!version) {
+    try {
+      const cleanPath = (process.env.PATH || "")
+        .split(path.delimiter)
+        .filter((p) => !p.includes("/.npm/_npx/") && !p.endsWith("/node_modules/.bin"))
+        .join(path.delimiter);
+      const raw = execFileSync("openclaw", ["--version"], {
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5000,
+        env: { ...process.env, PATH: cleanPath },
+      }).toString().trim();
+      const m = raw.match(/(\d{4})\.(\d{1,2})(?:\.(\d{1,3}))?/);
+      if (m) {
+        version = m[3] ? `${m[1]}.${m[2]}.${m[3]}` : `${m[1]}.${m[2]}`;
+        probedFrom = "PATH (npx-bin pruned)";
+      }
+    } catch (err) {
+      return { supported: false, version: "", reason: `cannot resolve runtime openclaw: ${err && err.message ? err.message.split("\n")[0] : err}` };
+    }
+  }
+
+  if (!version) {
+    return { supported: false, version: "", reason: "openclaw runtime version unknown" };
+  }
+
+  const m = version.match(/(\d{4})\.(\d{1,2})/);
+  if (!m) return { supported: false, version, reason: `cannot parse "${version}"` };
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  const supported =
+    year > MIN_MCP_SERVERS_VERSION.year ||
+    (year === MIN_MCP_SERVERS_VERSION.year && month >= MIN_MCP_SERVERS_VERSION.month);
+  return {
+    supported,
+    version,
+    reason: supported
+      ? `>= ${MIN_MCP_SERVERS_VERSION.year}.${MIN_MCP_SERVERS_VERSION.month} (from ${probedFrom})`
+      : `< ${MIN_MCP_SERVERS_VERSION.year}.${MIN_MCP_SERVERS_VERSION.month} (from ${probedFrom})`,
+  };
+}
+
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const home = process.env.HOME || process.env.USERPROFILE || ".";
 const openclawHome = valueOf("--openclaw-home") || process.env.OPENCLAW_HOME || path.join(home, ".openclaw");
@@ -82,9 +171,27 @@ const hostBased = (() => {
     return `agent-${os.hostname().replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40)}`;
   } catch { return "atel-agent"; }
 })();
+// Read existing atel-state.json so re-install without --name preserves
+// the operator's chosen name. Without this, "npx atel-mcp-openclaw" with
+// no --name silently rewrote the agent display to hostname-based junk
+// like "agent-VM-0-13-ubuntu" — and the platform's UPDATE then accepted
+// it because the new value was a real string (fix 1's atel-agent-only
+// guard didn't catch it). Empty / placeholder ("atel-agent") values are
+// ignored so this only preserves *intentional* names.
+const existingStateName = (() => {
+  try {
+    const sf = path.join(extensionsDir, "atel-mcp-openclaw", "atel-state.json");
+    if (!fs.existsSync(sf)) return "";
+    const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
+    const n = (cur?.name || "").trim();
+    if (n && n !== "atel-agent") return n;
+  } catch {}
+  return "";
+})();
 const agentName = (
   valueOf("--name")
   || process.env.ATEL_AGENT_NAME
+  || existingStateName
   || promptAgentName(hostBased)
   || hostBased
 ).slice(0, 64);
@@ -495,6 +602,89 @@ config.plugins.installs[PLUGIN_ID] = {
   resolvedSpec: "atel-mcp-openclaw@0.2.1",
   installedAt: new Date().toISOString()
 };
+// 0.6.15: Configure ATEL as an OpenClaw native MCP server (mcp.servers.atel).
+// This bypasses the OpenClaw plugin tool registration path (which silently
+// drops atel_mcp tool because OpenClaw's installs.json cache doesn't
+// persist contracts.tools — verified empirically). With mcp.servers, the
+// LLM sees atel_whoami / atel_balance / atel_milestone_submit / etc. as
+// first-class tools (prefixed `atel__atel_whoami` in OpenClaw's view) and
+// invokes them via streamable-http transport. No exec hack, no contract
+// dance, no OpenClaw plugin loader compatibility surprises.
+//
+// JWT is fetched from platform /auth/v1/did-sig at install time (7d TTL
+// from platform; user re-installs after expiry to refresh).
+//
+// 0.6.18 R12: gate on OpenClaw version. mcp.servers config schema landed
+// in OpenClaw 2026.5.x. Older runtimes (verified: 2026.2.25 龙虾乙,
+// 2026.3.13 龙虾甲) reject the whole config with "Unrecognized key: mcp"
+// at gateway start, which silently breaks every downstream tool path.
+// Detect via `openclaw --version` and skip mcp.servers write on older
+// versions; plugin still works via the legacy cron+tool path on those.
+const mcpServersSupport = detectMcpServersSupport();
+if (!mcpServersSupport.supported) {
+  // Strip any pre-existing mcp.servers.atel that a previous install
+  // (or a manual edit, or a same-machine OpenClaw downgrade) may have
+  // left behind. Without this, the older runtime would still hit
+  // "Unrecognized key: mcp" on next gateway start, defeating the
+  // whole point of the version gate.
+  let stripped = false;
+  if (config.mcp?.servers?.atel) {
+    delete config.mcp.servers.atel;
+    stripped = true;
+  }
+  if (config.mcp?.servers && Object.keys(config.mcp.servers).length === 0) {
+    delete config.mcp.servers;
+  }
+  if (config.mcp && Object.keys(config.mcp).length === 0) {
+    delete config.mcp;
+  }
+  console.log(`Skipping mcp.servers.atel write — OpenClaw ${mcpServersSupport.version || "version unknown"} does not support mcp.servers (need >= 2026.5.0). Plugin will use cron + tool path. Reason: ${mcpServersSupport.reason}${stripped ? " (stripped stale mcp.servers.atel from existing config)" : ""}`);
+} else try {
+  const idJson = JSON.parse(fs.readFileSync(resolvedIdentityPath, "utf8"));
+  const skRaw = idJson.secretKey;
+  const sk = /^[0-9a-fA-F]+$/.test(skRaw) ? Buffer.from(skRaw, "hex") : Buffer.from(skRaw, "base64");
+  const naclMod = await import(path.join(extensionDir, "node_modules", "tweetnacl", "nacl.js"));
+  const nacl = naclMod.default ?? naclMod;
+  const sortKeys = (o) => JSON.stringify(o, (_k, v) => {
+    if (v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Uint8Array)) {
+      const s = {};
+      for (const k of Object.keys(v).sort()) s[k] = v[k];
+      return s;
+    }
+    return v;
+  });
+  const ts = new Date().toISOString();
+  const tokPayload = { scopes: [
+    "identity.read", "wallet.read", "wallet.transfer", "wallet.withdraw",
+    "contacts.read", "contacts.write", "messages.read", "messages.write",
+    "orders.read", "orders.write", "milestones.read", "milestones.write",
+    "a2b.read", "a2b.write", "disputes.read", "disputes.write", "audit.read"
+  ]};
+  const signable = sortKeys({ payload: tokPayload, did: idJson.did, timestamp: ts });
+  const sig = Buffer.from(nacl.sign.detached(Buffer.from(signable), sk)).toString("base64");
+  const envBody = JSON.stringify({ did: idJson.did, payload: tokPayload, timestamp: ts, signature: sig });
+  const tokRes = await fetch(`${platformBaseUrl.replace(/\/+$/, "")}/auth/v1/did-sig`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: envBody,
+  });
+  const tokData = await tokRes.json();
+  if (tokData?.token) {
+    config.mcp = config.mcp || {};
+    config.mcp.servers = config.mcp.servers || {};
+    config.mcp.servers.atel = {
+      url: `${serverBaseUrl.replace(/\/+$/, "")}/mcp`,
+      transport: "streamable-http",
+      headers: { Authorization: `Bearer ${tokData.token}` },
+    };
+    console.log(`mcp.servers.atel configured — LLM will see ATEL tools (atel__atel_whoami etc.) via OpenClaw native MCP transport (token expires ${new Date((tokData.expiresAt || 0) * 1000).toISOString()})`);
+  } else {
+    console.warn(`warn: did-sig token fetch returned no token (${JSON.stringify(tokData).slice(0, 200)}). Skipping mcp.servers.atel; LLM will fall back to plugin/exec-hack path.`);
+  }
+} catch (err) {
+  console.warn(`warn: failed to configure mcp.servers.atel: ${err && err.message}. Plugin still works via cron + tool path; LLM may not see atel_xxx tools directly.`);
+}
+
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 
 // We DON'T run `openclaw doctor` here. Reasons:
@@ -596,27 +786,37 @@ WantedBy=default.target
   console.warn(`warn: could not install systemd listener unit: ${e && e.message}. Plugin still functional in pull mode but transfer_received / P2P chat cards won't dispatch to TG.`);
 }
 
+// Restart the gateway by default (0.6.10): new plugin code (especially
+// register()-time tool registration like atel_mcp) is held in the gateway
+// process's memory and is NOT picked up just by replacing files on disk.
+// Skipping this restart caused 0.6.8/0.6.9-installed boxes to log
+// "unknown method: atel_mcp" and the agent to silently NO_REPLY because
+// the LLM tried calling a tool the running gateway hadn't loaded.
+//
+// Why not stay on the 0.6.8 default-off: cron message + SKILL.md DO
+// reload from disk, but plugin tool registration only runs at
+// gateway.register() time. Without restart, an upgrade silently leaves
+// the agent half-working — old tool surface, new docs.
+//
+// Why 30s and not 5s: the original 5s window let the agent send its
+// install summary card before SIGTERM, but if the agent was mid-LLM-turn
+// (writing milestone content, etc.) 5s wasn't enough and SIGTERM cut it
+// off. 30s covers a full LLM round trip + TG send. Anyone wanting the
+// instant-restart behavior can pass `--restart-fast`. `--no-restart`
+// still honored for headless/CI/test paths that manage gateway lifecycle
+// themselves.
 if (!has("--no-restart")) {
-  // Restart in 5 seconds, detached, so install.js can finish first.
-  // Reason: when an OpenClaw agent triggers the install via its `exec`
-  // tool, the agent runs INSIDE the gateway. A synchronous restart kills
-  // the agent mid-turn before it can relay the install summary back to
-  // TG — the user sees the bot go silent and assumes failure even though
-  // install actually succeeded.
-  //
-  // 5s is empirically enough for: install.js → exit → agent receives
-  // exec result → agent generates final TG message → TG send queued.
-  // Then gateway dies + respawns; TG message arrives ~the same moment.
+  const restartDelay = has("--restart-fast") ? 5 : 30;
   try {
     const { spawn } = await import("node:child_process");
     spawn("sh", [
       "-c",
-      "sleep 5 && systemctl --user restart openclaw-gateway.service",
+      `sleep ${restartDelay} && systemctl --user restart openclaw-gateway.service`,
     ], {
       detached: true,
       stdio: "ignore",
     }).unref();
-    console.log("(gateway will restart in 5 seconds — pause to let install summary reach the chat first)");
+    console.log(`(gateway will restart in ${restartDelay}s so the new plugin code is actually loaded — pause is to let your current TG reply finish; pass --no-restart to skip, --restart-fast for 5s)`);
   } catch {
     console.error("warn: could not schedule openclaw-gateway restart; run manually: systemctl --user restart openclaw-gateway");
   }
@@ -666,9 +866,10 @@ const CRON_MESSAGE = [
   "      For each unique order: atel_mcp action=call tool=atel_milestone_plan_feedback args={\"orderId\":\"<orderId>\",\"approved\":true}.",
   "",
   "   C. atel_mcp action=call tool=atel_order_list args={\"role\":\"executor\",\"status\":\"executing\"}",
-  "      For each order: atel_mcp action=call tool=atel_milestone_list args={\"orderId\":\"<orderId>\"}. Find the LOWEST milestone with status=\"draft\". If found:",
+  "      For each order: atel_mcp action=call tool=atel_milestone_list args={\"orderId\":\"<orderId>\"}. Find the LOWEST milestone whose status is one of: \"draft\", \"pending\", \"rejected\". If found:",
   "        - Read milestones[M].title and atel_mcp action=call tool=atel_order_get args={\"orderId\":\"<orderId>\"} for the order description.",
-  "        - WRITE THE ACTUAL DELIVERABLE TEXT in the language the order asks for. Real content. Not \"TBD\", not placeholder.",
+  "        - If status is \"rejected\": read milestones[M].result_summary or the most recent milestone_rejected event in your inbox to see the reject reason, then fix what was wrong. NEVER resubmit the same content.",
+  "        - WRITE THE ACTUAL DELIVERABLE TEXT in the language the order asks for. Real content. Not \"TBD\", not placeholder text, not \"I understand the requirement\". Reject reason \"Content is empty or placeholder\" means the platform's verifier saw filler — write substantive deliverable.",
   "        - atel_mcp action=call tool=atel_milestone_submit args={\"orderId\":\"<orderId>\",\"index\":<M>,\"content\":\"<your deliverable>\"}.",
   "",
   "   D. atel_mcp action=call tool=atel_order_list args={\"role\":\"requester\",\"status\":\"executing\"}",

@@ -13,6 +13,7 @@
 
 import { startListener } from "./listener.js";
 import { startHeartbeat } from "./heartbeat.js";
+import { startPollLoop } from "./poll-loop.js";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -40,13 +41,25 @@ const identityPath = process.env.ATEL_IDENTITY_PATH
 
 console.log(`[atel-listener] starting on ${HOST}:${PORT}, platform=${platformBaseUrl}`);
 
-await startListener({ host: HOST, port: PORT });
+await startListener({ host: HOST, port: PORT, platformBaseUrl, identityPath });
 console.log("[atel-listener] bound");
 
 startHeartbeat({
   platformBaseUrl,
   identityPath,
   intervalMs: Number(process.env.ATEL_HEARTBEAT_INTERVAL_MS || 90_000),
+});
+
+// Always start the in-process poll loop alongside the push listener.
+// Push and pull aren't either/or — push has lower latency when it
+// works, pull guarantees liveness when push doesn't (NAT, firewall,
+// or platform retries hitting their cap). ack semantics on the platform
+// side dedupe so a message picked up by push won't be re-dispatched
+// by the next poll tick.
+startPollLoop({
+  platformBaseUrl,
+  identityPath,
+  intervalMs: Number(process.env.ATEL_POLL_INTERVAL_MS || 30_000),
 });
 
 // Surface unhandled errors loudly so systemd Restart=always picks us up.

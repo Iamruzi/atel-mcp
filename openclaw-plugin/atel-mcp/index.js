@@ -17,16 +17,22 @@
 import { createAtelMcpTool, readPluginConfig } from "./src/tool.js";
 import { setupReverseChannel } from "./src/setup.js";
 
+// As of 0.6.15 the primary tool surface is `mcp.servers.atel` configured
+// in openclaw.json by bin/install.js — OpenClaw's native MCP-client
+// transport gives the LLM direct access to atel_whoami / atel_balance /
+// atel_milestone_submit etc. as `atel__atel_whoami` etc. We still attempt
+// the legacy plugin-tool registration of `atel_mcp` here as a fallback
+// surface (cron prompts that explicitly say "atel_mcp action=..." can
+// still find it on the rare runtime where MCP-server config didn't
+// hydrate). OpenClaw's loader silently drops this registration on
+// 2026.5.7 due to an installs.json contracts cache bug — that's
+// acceptable now since mcp.servers.atel is the real path.
 const plugin = {
-  // Must match manifest id and npm package name; OpenClaw warns on mismatch.
   id: "atel-mcp-openclaw",
   name: "ATEL MCP",
   description: "Bridge OpenClaw to the remote ATEL MCP server",
   register(api) {
-    api.registerTool(createAtelMcpTool(api.runtime));
-
-    // Reverse channel setup runs async — we don't block plugin
-    // registration on it. Failures degrade to pull mode silently.
+    try { api.registerTool(createAtelMcpTool(api.runtime)); } catch {}
     setTimeout(() => {
       try {
         const config = readPluginConfig(api.runtime);

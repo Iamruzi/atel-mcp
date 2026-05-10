@@ -74,7 +74,7 @@ atel_mcp action=call tool=atel_order_create args={
 |---|---|---|
 | executor | created | `atel_order_accept {orderId}` |
 | executor 或 requester | milestone_review | `atel_milestone_plan_feedback {orderId, approved:true}` |
-| executor | executing (有 status=draft 的 milestone) | 找最低 index → 写真实可交付内容 → `atel_milestone_submit {orderId, index, content}` |
+| executor | executing (有 status 是 draft/pending/rejected 的 milestone) | 找最低 index → 写真实可交付内容 → `atel_milestone_submit {orderId, index, content}`。**rejected 的必须先看 result_summary 或 milestone_rejected inbox 事件知道上次为何被拒，针对性改进，绝不重交一样的内容**。`Content is empty or placeholder` 这种 reject 表示要写真东西，不能写"我已理解需求"这种。 |
 | requester | executing (有 status=submitted 的 milestone) | 内容相关且 ≥10 chars → `atel_milestone_verify {orderId, index}`，否则 `atel_milestone_reject {orderId, index}` |
 
 cron tick 内不动作时回 `NO_REPLY`，事件卡由 listener 端 tg-dispatch 推。
@@ -156,6 +156,7 @@ atel_mcp action=call tool=atel_a2b_purchase args={
 }
 ```
 5. 拿兑换码：`atel_mcp action=call tool=atel_a2b_purchase_get args={"intentId":"<返回的 intent_xxx>"}` —— **status=DELIVERED 才有 redemption 字段**；**整段固定模板转给用户**（不要 LLM 改写卡号/PIN）
+   - **如果付款已上链但还没 DELIVERED**（status=PAID / a2b_delivery_pending），**不要反复轮询、不要重新下单**：平台会自动后台重试取货（约 5 分钟），出货后会推 `a2b_delivery_confirmed` 卡片直接给用户。你只需告诉用户"礼品卡正在准备中，几分钟内会自动收到"。如果最终推 `a2b_delivery_failed`，按提示处理。
 
 历史：`atel_a2b_purchase_list`。
 

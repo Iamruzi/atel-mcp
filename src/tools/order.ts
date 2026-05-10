@@ -51,12 +51,20 @@ export async function atelOrderCreate(ctx: ToolExecutionContext, input: unknown)
   parsed.capabilityType = capCheck.normalized;
 
   // Reject before locking funds: executor exists & online & has the capability,
-  // requester wallet on base is deployed, requester has price + 5% gas buffer.
-  // Without these, order goes onchain → escrow lock → executor can never accept
-  // (offline / wrong skill) → order expires → user waits + frustration.
+  // requester wallet on the settlement chain is deployed + has price + 5%
+  // gas buffer. Without these, order goes onchain → escrow lock → executor
+  // can never accept (offline / wrong skill) → order expires → user frustration.
+  //
+  // chain selection: requester-provided chain wins; otherwise default 'base'
+  // to preserve pre-fast-coop behavior. fast-coop bypasses EVM wallet checks
+  // because the requester's Fast address IS their DID (no separate wallet
+  // deployment, no gas budget needed beyond Fast tx fee).
   await assertPrerequisite(ctx.session, () => executorReady(ctx, parsed.executorDid, parsed.capabilityType));
-  await assertPrerequisite(ctx.session, () => walletReady(ctx, 'base'));
-  await assertPrerequisite(ctx.session, () => sufficientBalance(ctx, 'base', parsed.priceUsdc));
+  const settleChain = parsed.chain ?? 'base';
+  if (settleChain === 'base' || settleChain === 'bsc') {
+    await assertPrerequisite(ctx.session, () => walletReady(ctx, settleChain));
+    await assertPrerequisite(ctx.session, () => sufficientBalance(ctx, settleChain, parsed.priceUsdc));
+  }
 
   let result: unknown;
   let backend = 'platform-hosted';

@@ -381,6 +381,7 @@ export async function createOrder(
     taskRequest?: unknown;
     taskSignature?: string;
     intent?: unknown;
+    chain?: 'base' | 'bsc' | 'fast-coop';
   },
 ) {
   // AVIP fields (version + taskRequest + taskSignature + intent) are
@@ -399,6 +400,9 @@ export async function createOrder(
     description: input.description,
     sourceLabel: 'ATEL MCP',
   };
+  if (input.chain) {
+    body.chain = input.chain;
+  }
   if (input.version === 2 && input.taskRequest && input.taskSignature) {
     body.version = 2;
     body.taskRequest = input.taskRequest;
@@ -444,7 +448,7 @@ export async function completeOrder(ctx: ToolExecutionContext, input: {
   proofBundle: unknown;
   anchorTx?: string;
   traceRoot: string;
-  chain?: 'base' | 'bsc';
+  chain?: 'base' | 'bsc' | 'fast-coop';
   traceEvents?: unknown;
   audit?: unknown;
 }) {

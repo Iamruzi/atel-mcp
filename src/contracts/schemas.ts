@@ -143,7 +143,12 @@ export const OrderCreateInputSchema = z.object({
   version: z.literal(2).optional(),
   taskRequest: TaskRequestSchema.optional(),
   taskSignature: z.string().min(1).optional(),
-  intent: z.record(z.unknown()).optional()
+  intent: z.record(z.unknown()).optional(),
+  // Settlement chain. Default 'base' on platform side when omitted.
+  // 'fast-coop' = Fast Network with evaluator-key escrow (USDC on Fast).
+  // Anti-drift: keep this enum in lockstep with platform's
+  // internal/trade/order_handler.go chain accept-list.
+  chain: z.enum(['base', 'bsc', 'fast-coop']).optional()
 });
 
 export const OrderAcceptInputSchema = z.object({
@@ -156,7 +161,7 @@ export const OrderCompleteInputSchema = z.object({
   proofBundle: z.record(z.string(), z.unknown()),
   anchorTx: z.string().min(1).optional(),
   traceRoot: z.string().min(1),
-  chain: z.enum(['base', 'bsc']).optional(),
+  chain: z.enum(['base', 'bsc', 'fast-coop']).optional(),
   traceEvents: z.array(z.record(z.string(), z.unknown())).optional(),
   audit: z.record(z.string(), z.unknown()).optional()
 });
