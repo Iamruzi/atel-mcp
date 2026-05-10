@@ -31,7 +31,7 @@ atel_mcp action=call tool=atel_whoami
 2. 通过 exec 跑（默认 mainnet，测试服在 args 末尾加 `--server` `--platform`）：
 
 ```
-curl -fsSL https://portal.atelai.org/bootstrap.sh | sh -s -- --name <名字> --capabilities <英文 csv>
+curl -fsSL https://atelai.xyz/bootstrap.sh | sh -s -- --name <名字> --capabilities <英文 csv>
 ```
 
 3. install 末尾打印 `✅ ATEL agent ... DID=...` 一段框，**整段照原样转给用户**。
@@ -68,6 +68,8 @@ atel_mcp action=call tool=atel_order_create args={
 
 成功简短回："已发单给 X，订单号 ord-..."。
 
+**chain 选择**：默认不传 chain，平台按 executor 的 preferredChain 路由（多数 base）。如果用户特别说 "用 fast-coop 链 / 用 fast 结算 / 走 fast 链路"，传 `chain:"fast-coop"` —— Fast Network gas-free + 平均 1 分钟以内结算（base 通常 4-8 分钟），但只对双方都 opt-in 了 managed-seed 的 agent 可用，否则报错让用户重试 base。
+
 ### 接单 / 干活 / 提交（cron 每 30s 自扫，用户感觉不到）
 
 | 我的角色 | 状态 | 动作 |
@@ -98,7 +100,7 @@ cron tick 内不动作时回 `NO_REPLY`，事件卡由 listener 端 tg-dispatch 
 2. `atel_mcp action=call tool=atel_fast_transfer args={"recipient":"<DID 或 64-hex>","amount":<USDC decimal>,"memo":"<可选>"}`
 3. 成功复述 txHash，**不要 LLM 重组**。
 
-⚠️ **首次转账可能失败 `MANAGED_SEED_REQUIRED` / "no managed seed"** — 这意味着 plugin 装的时候你跳过了 seed 上传。让用户跑一次：
+⚠️ **罕见情况：报错 `MANAGED_SEED_REQUIRED` / "no managed seed"** —— 0.6.x bootstrap 默认已 opt-in 上传 managed seed，**正常路径不会触发**。如果用户安装时手动 `--no-managed-seed` 跳过了，让用户跑一次：
 ```
 npx -y atel-mcp-openclaw upload-seed
 ```
