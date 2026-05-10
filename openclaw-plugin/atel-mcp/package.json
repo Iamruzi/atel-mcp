@@ -1,6 +1,6 @@
 {
   "name": "atel-mcp-openclaw",
-  "version": "0.6.22",
+  "version": "0.6.23",
   "type": "module",
   "description": "OpenClaw plugin: bridge OpenClaw runtime to ATEL Remote MCP via DID-Sig auth",
   "main": "index.js",

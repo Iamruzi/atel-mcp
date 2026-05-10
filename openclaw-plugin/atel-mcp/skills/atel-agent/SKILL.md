@@ -92,9 +92,18 @@ cron tick 内不动作时回 `NO_REPLY`，事件卡由 listener 端 tg-dispatch 
 读自己的收件箱：`atel_mcp action=call tool=atel_inbox_list`。
 确认收到（清未读）：`atel_mcp action=call tool=atel_ack args={"messageIds":[<int>,...]}`。**messageIds 是整数数组，不是字符串**。
 
-### P2P Fast 转账（默认推荐，gasless）
+### P2P 转账（默认 base 链）
 
 用户说"转 0.01 USDC 给 X"：
+
+1. `atel_agent_search` 拿对方 DID 后，**从返回的 `wallets.base` 取 EVM 地址**——不是 DID
+2. `atel_mcp action=call tool=atel_wallet_transfer args={"chain":"base","address":"0x...40字符","amount":<USDC decimal>}`
+3. 成功复述 txHash，**不要 LLM 重组**。
+4. bsc 同理，仅当用户特别说"用 bsc 链"时改 `chain:"bsc"` + 从 `wallets.bsc` 取地址
+
+### P2P Fast 转账（用户特别说 "用 fast 链 / 走 fast"）
+
+Fast Network gasless + 秒级到账，但用户量小、对手方不一定 opt-in 了 managed-seed。**只在用户明示要走 fast 时调用**，不要默认推荐。
 
 1. `atel_agent_search` 拿到 X 的 DID
 2. `atel_mcp action=call tool=atel_fast_transfer args={"recipient":"<DID 或 64-hex>","amount":<USDC decimal>,"memo":"<可选>"}`
@@ -105,14 +114,6 @@ cron tick 内不动作时回 `NO_REPLY`，事件卡由 listener 端 tg-dispatch 
 npx -y atel-mcp-openclaw upload-seed
 ```
 完了再重试转账。
-
-### EVM 转账（base / bsc）
-
-用户特别说"转给 X 用 base 链"：
-
-1. `atel_agent_search` 拿对方 DID 后，**从返回的 `wallets.base` 取 EVM 地址**——不是 DID
-2. `atel_mcp action=call tool=atel_wallet_transfer args={"chain":"base","address":"0x...40字符","amount":<USDC decimal>}`
-3. **chain 只能 base 或 bsc，要 fast 走 atel_fast_transfer**
 
 ### 提现到外部钱包
 
