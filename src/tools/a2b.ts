@@ -133,31 +133,37 @@ export async function atelA2bPurchaseGet(ctx: ToolExecutionContext, input: unkno
   if (!detail) return null;
 
   // Anti-drift: redemption code is returned when status=DELIVERED/FULFILLED
-  // OR when the redemption ciphertext is already sealed in DB
-  // (detail.redemption.has_code === true).
+  // OR when delivery.ready === true (Bitrefill has sealed the redemption
+  // ciphertext server-side even if on-chain status hasn't flipped yet).
   //
   // 2026-05-11: tester report 4.5 — purchased gift card showed
-  // `delivery.ready=true` (has_code=true) but status was EXPIRED_OR_ABANDONED
+  // `delivery.ready=true` but `effectiveStatus=EXPIRED_OR_ABANDONED`
   // (Bitrefill side delivered + redemption stored, but on-chain ConfirmDelivery
-  // missed the deadline window, so platform's EffectiveStatus fell to
-  // EXPIRED). Without including has_code, the user paid real USDC + Bitrefill
-  // sent a real code but the MCP tool refused to surface it. The fund + code
-  // are reality; we should hand the code over.
+  // missed the deadline window, so EffectiveStatus fell to EXPIRED). Without
+  // a delivery.ready bypass, the user paid real USDC + Bitrefill sent a real
+  // code but the MCP tool refused to surface it. The fund + code are reality;
+  // we should hand the code over.
   //
-  // Reading status from multiple shapes because platform serializes the
-  // detail payload in different keys depending on the response path
-  // (status_name from onchain block, contract_status from older list, status
-  // from new effective-status field).
+  // Status is read from multiple shapes because /trade/v1/remote/a2b/order
+  // (this tool's adapter) and /trade/v1/a2b/detail (dashboard) serialize
+  // the payload differently — onchain.status (remote) vs onchain.status_name
+  // (dashboard), effectiveStatus (remote) vs status (dashboard).
   const detailAny = detail as Record<string, unknown> & {
-    onchain?: { status_name?: string };
-    redemption?: { has_code?: boolean };
+    onchain?: { status?: string; status_name?: string };
+    delivery?: { ready?: boolean };
+    effectiveStatus?: string;
+    contractStatus?: string;
   };
-  const onchainStatus = String(detailAny.onchain?.status_name ?? '').toUpperCase();
-  const status = String(detail.status ?? detail.contract_status ?? onchainStatus).toUpperCase();
-  const hasCode = detailAny.redemption?.has_code === true;
+  const onchainStatus = String(
+    detailAny.onchain?.status ?? detailAny.onchain?.status_name ?? ''
+  ).toUpperCase();
+  const status = String(
+    detail.status ?? detail.contract_status ?? detailAny.effectiveStatus ?? detailAny.contractStatus ?? onchainStatus
+  ).toUpperCase();
+  const deliveryReady = detailAny.delivery?.ready === true;
   let redemption: unknown = null;
   let revealOk = false;
-  if (status === 'DELIVERED' || status === 'FULFILLED' || hasCode) {
+  if (status === 'DELIVERED' || status === 'FULFILLED' || deliveryReady) {
     try {
       redemption = await a2bRedemptionReveal(ctx, parsed.intentId);
       revealOk = true;

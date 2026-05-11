@@ -151,10 +151,15 @@ export async function a2bDetail(ctx: ToolExecutionContext, intentId: string) {
 }
 
 export async function a2bRedemptionReveal(ctx: ToolExecutionContext, intentId: string) {
+  // POST /trade/v1/remote/a2b/order/:intentId/redemption — platform expects
+  // POST (not GET) so it can write an action trace + fetch redemption from
+  // Bitrefill if not yet sealed. 2026-05-11: tester report 4.5 root cause —
+  // adapter used GET, platform rejected with "could not complete this
+  // request", purchase_get returned redemption.error=reveal_failed even
+  // though the code was already sealed in DB.
   return ctx.platform.request<unknown>({
-    method: 'GET',
+    method: 'POST',
     path: PLATFORM_ENDPOINTS.a2b.redemptionReveal(intentId),
-    query: { did: ctx.session.did },
     bearerToken: ctx.session.bearerToken,
   });
 }
