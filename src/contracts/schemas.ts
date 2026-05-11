@@ -153,11 +153,23 @@ export const OrderCreateInputSchema = z.object({
   taskRequest: TaskRequestSchema.optional(),
   taskSignature: z.string().min(1).optional(),
   intent: z.record(z.unknown()).optional(),
-  // Settlement chain. Default 'base' on platform side when omitted.
-  // 'fast-coop' = Fast Network with evaluator-key escrow (USDC on Fast).
-  // Anti-drift: keep this enum in lockstep with platform's
-  // internal/trade/order_handler.go chain accept-list.
-  chain: z.enum(['base', 'bsc', 'fast-coop']).optional()
+  // Settlement chain. REQUIRED — caller MUST explicitly pick one.
+  // 2026-05-11: previously .optional() with platform-side default 'base'.
+  // Two consecutive prod tests (ord-89fccad9-fc9, ord-180272fe-9a5,
+  // ord-f27b0ad8-67d) all silently fell back to base because the LLM
+  // kept reading the SKILL's P2P Fast transfer section, deciding "fast"
+  // was a transfer keyword, and omitting chain. Making this required
+  // forces the LLM to face a deterministic decision at tool-call time:
+  // pick base/bsc/fast-coop based on what the user said. Anti-drift:
+  // keep enum in lockstep with platform's internal/trade/order_handler.go.
+  chain: z.enum(['base', 'bsc', 'fast-coop'])
+    .describe(
+      'REQUIRED settlement chain for the order escrow. Pick exactly one based on the user\'s words: ' +
+      '(1) "base" — Base EVM AutoEscrow (~4-8min settle). DEFAULT when the user does NOT mention fast/bsc anywhere in the request. ' +
+      '(2) "fast-coop" — Fast Network gasless escrow (~1min). MUST pick this whenever the user\'s message contains ANY of these tokens, regardless of surrounding context: "fast", "fast-coop", "fast 链", "走 fast", "用 fast", "这单 fast", "fast 结算". Do not second-guess based on whether the sentence "feels like" a transfer — fast in an order_create call always means fast-coop chain. ' +
+      '(3) "bsc" — BSC EVM AutoEscrow. MUST pick when user says "bsc / 走 bsc". ' +
+      'You CANNOT omit this field; the schema rejects missing chain.'
+    )
 });
 
 export const OrderAcceptInputSchema = z.object({

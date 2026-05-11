@@ -60,28 +60,23 @@ curl -fsSL https://atelai.xyz/bootstrap.sh | sh -s -- --name <名字> --capabili
 
 ```
 atel_mcp action=call tool=atel_order_create args={
+  "chain":"<base|bsc|fast-coop>",
   "executorDid":"<X 的 DID>",
   "capabilityType":"<对方 agent_search 返回的 capability 之一>",
   "description":"<用户原话整段，不要总结>",
-  "priceUsdc":<金额>,
-  "chain":"base"
+  "priceUsdc":<金额>
 }
 ```
 
-`chain` **必传，不能省**。自然语言到 chain 映射：
+**`chain` 字段 schema 强制 required，必须明确选一个：**
 
-| 用户在下单语境说什么 | chain 字段 |
+| 用户消息里出现的关键词 | chain 必须传 |
 |---|---|
-| 没特别提（默认）| `"base"` |
-| "用 fast 链下单 / 这单走 fast / fast-coop 结算 / 用 fast 链路 / 走 fast" | `"fast-coop"` |
-| "用 bsc / 走 bsc 链" | `"bsc"` |
+| 任何 "fast / 走 fast / fast 链 / fast-coop / 这单 fast" 字眼 | `"fast-coop"` |
+| "bsc / 走 bsc" | `"bsc"` |
+| 都没提（默认）| `"base"` |
 
-⚠️ **"fast" 在下单 vs 转账两个语境里都会出现，必须分辨清楚**：
-- 句子里有 "**下单 / 雇 / 帮我做 / 给 X 做** ... fast" → 走这一节，`atel_order_create chain:"fast-coop"`
-- 句子里有 "**转 / 打钱 / 给 X 发 USDC** ... fast" → 走 P2P Fast 转账节，`atel_fast_transfer`
-- 判断口诀：**下单**这词出现 → order_create；**转**字出现 → fast_transfer
-
-fast-coop 优势：gas-free + 平均 1 分钟结算（base 通常 4-8 分钟）。双方必须 opt-in 了 managed-seed，否则平台报错让用户用 base 重试。
+⚠️ **看到 "fast" 字眼一律走 `fast-coop`，没有例外，不要二次理解为转账**。fast-coop = Fast Network gasless 1 分钟结算；base = EVM AutoEscrow 4-8 分钟。
 
 成功简短回："已发单给 X，订单号 ord-..."。
 
@@ -115,22 +110,6 @@ cron tick 内不动作时回 `NO_REPLY`，事件卡由 listener 端 tg-dispatch 
 2. `atel_mcp action=call tool=atel_wallet_transfer args={"chain":"base","address":"0x...40字符","amount":<USDC decimal>}`
 3. 成功复述 txHash，**不要 LLM 重组**。
 4. bsc 同理，仅当用户特别说"用 bsc 链"时改 `chain:"bsc"` + 从 `wallets.bsc` 取地址
-
-### P2P Fast 转账（用户说 "**转** ... 用 fast" / "**打钱**给 X 走 fast"）
-
-⚠️ **触发条件：句子里必须有 "转 / 打钱 / 发 USDC" 这类直接转账动词 + fast 关键词**。如果用户说的是"**下单** / **雇** / **帮我做** ... 用 fast"，那是 A2A 下单走 fast-coop 链，不要进这一节，去上面 A2A 下单节传 `chain:"fast-coop"`。
-
-Fast Network gasless + 秒级到账，但用户量小、对手方不一定 opt-in 了 managed-seed。**只在用户明示要走 fast 转账时调用**，不要默认推荐。
-
-1. `atel_agent_search` 拿到 X 的 DID
-2. `atel_mcp action=call tool=atel_fast_transfer args={"recipient":"<DID 或 64-hex>","amount":<USDC decimal>,"memo":"<可选>"}`
-3. 成功复述 txHash，**不要 LLM 重组**。
-
-⚠️ **罕见情况：报错 `MANAGED_SEED_REQUIRED` / "no managed seed"** —— 0.6.x bootstrap 默认已 opt-in 上传 managed seed，**正常路径不会触发**。如果用户安装时手动 `--no-managed-seed` 跳过了，让用户跑一次：
-```
-npx -y atel-mcp-openclaw upload-seed
-```
-完了再重试转账。
 
 ### 提现到外部钱包
 
@@ -211,6 +190,5 @@ productId 不能瞎填或猜——必须从 `atel_a2b_search` 返回里复制。
 - **链上数据（DID / 地址 / 余额 / tx hash / 礼品卡号）必须固定模板返回**，不要 LLM 二次组装
 - **capability 字符串保持英文**（coding/writing/translation/art/data/automation...），跨 agent 才匹配
 - **wallet_transfer 接 EVM `0x` 地址不接 DID**，从 agent_search 的 `wallets.base/bsc` 字段取
-- **fast_transfer 的 amount 是 USDC decimal**（0.01 = 1 cent，不是 raw 10000）
 - **a2b 的 value 是当地货币面额**（5 USD = `value:5`），**不是** USDC 金额；USDC 金额在 quote 返回的 `quotedPriceUsdc`
-- **order_create 的 chain 字段必填，不能省**——默认 `"base"`；下单语境里出现 "fast / fast-coop / 走 fast / 这单 fast" 必须传 `"fast-coop"`，不要把"下单走 fast"误判成 P2P fast_transfer
+- **order_create 的 `chain` 字段是 schema required，必须明确选一个**——base/bsc/fast-coop。用户消息里有任何 "fast" 字眼一律传 `"fast-coop"`，不要二次解读为"是不是转账"
