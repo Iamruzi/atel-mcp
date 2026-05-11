@@ -616,10 +616,45 @@ async function callRemoteTool(runtime, toolName, args) {
   // verifies the signature and runs the AVIP v2 path (Intent anchored,
   // CompletionProof at settle).
   let parsed = parseArgs(args);
+
+  // ─── Deterministic chain auto-inject for atel_order_create ───
+  // 2026-05-11: after multiple consecutive prod tests showed the LLM
+  // keeps omitting or mis-picking the chain field despite SKILL rewrites,
+  // schema chain.required, and model switches (DeepSeek v3.2/v4 →
+  // gpt-5.4-mini → GLM-4-Air → MiniMax-M2.7), we fall back to a
+  // keyword-based deterministic detection on the description field.
+  // SKILL.md mandates description = "用户原话整段，不要总结", so the
+  // user's literal phrase (containing "fast 链" / "走 fast" / etc) ends
+  // up verbatim here. Detecting the keyword and overriding chain bypasses
+  // LLM ambiguity entirely — we FORCE-OVERRIDE even when the LLM picked
+  // a (wrong) chain value, because ord-6731550a-190 / ord-f27b0ad8-67d /
+  // ord-89fccad9-fc9 all showed the LLM happily picking "base" while
+  // the user clearly said "fast 链". User intent in the description
+  // string trumps the LLM's wrong inference.
+  if (toolName === "atel_order_create" && parsed.description) {
+    const desc = String(parsed.description);
+    // Match "fast" anchored by chain-context tokens to avoid false
+    // positives ("fast food", "fast learner"). Acceptable: "fast 链",
+    // "fast-coop", "走 fast", "用 fast", "fast 结算", "这单 fast".
+    const fastCoopPattern = /fast[\s-]?(?:链|chain|coop|结算|链路)|走\s?fast|用\s?fast(?:[\s-]?链)?(?!\s?food|\s?learner)|这单\s?fast/i;
+    const bscPattern = /\b(?:用|走)\s?bsc\b|\bbsc\s?链\b/i;
+    if (fastCoopPattern.test(desc) && parsed.chain !== "fast-coop") {
+      console.log(`[atel-mcp] force-override chain "${parsed.chain || '<unset>'}" → "fast-coop" (description matched fast keyword)`);
+      parsed.chain = "fast-coop";
+    } else if (bscPattern.test(desc) && parsed.chain !== "bsc") {
+      console.log(`[atel-mcp] force-override chain "${parsed.chain || '<unset>'}" → "bsc" (description matched bsc keyword)`);
+      parsed.chain = "bsc";
+    } else if (!parsed.chain) {
+      // No keyword + LLM didn't pick — default to base
+      parsed.chain = "base";
+      console.log(`[atel-mcp] no chain keyword + LLM omitted, defaulting chain="base"`);
+    }
+  }
+
   if (toolName === "atel_order_create" && !parsed.taskRequest) {
     try {
       parsed = await augmentWithAvip(runtime, parsed);
-      console.log(`[atel-mcp] AVIP envelope built — taskId=${parsed.taskRequest?.taskId} intentId=${parsed.intent?.intentId}`);
+      console.log(`[atel-mcp] AVIP envelope built — taskId=${parsed.taskRequest?.taskId} intentId=${parsed.intent?.intentId} chain=${parsed.chain || '<unset>'}`);
     } catch (e) {
       console.warn(`[atel-mcp] AVIP signing failed (${e && e.message}); falling back to v0 order create`);
       // Don't throw — the v0 path still works for backward compat.
