@@ -130,12 +130,20 @@ const extensionsDir = valueOf("--extensions-dir") || process.env.OPENCLAW_EXTENS
 // install run cleans them up via the legacy-id removal below.
 const extensionDir = path.join(extensionsDir, "atel-mcp-openclaw");
 const legacyExtensionDir = path.join(extensionsDir, "atel-mcp");
+// 2026-05-11: tester report 4.3 — Ubuntu user had identity at
+// `/home/ubuntu/atel-workspace/.atel/identity.json` but firstFile() returned
+// null because the candidate list missed this canonical SDK workspace path
+// under $HOME. dashboard_auth then failed because plugin config wrote
+// identityPath as undefined / empty object. Now we both (1) add the path
+// to the candidate list and (2) supply a fallback default so we never end
+// up with a missing identityPath in plugin config.
 const identityPath = valueOf("--identity") || process.env.ATEL_IDENTITY_PATH || firstFile([
   path.join(process.cwd(), ".atel", "identity.json"),
   path.join(home, ".atel", "identity.json"),
+  path.join(home, "atel-workspace", ".atel", "identity.json"),
   path.join(openclawHome, "workspace", ".atel", "identity.json"),
   path.join(openclawHome, "workspace", "atel-sdk", ".atel", "identity.json"),
-]);
+]) || path.join(home, "atel-workspace", ".atel", "identity.json");
 const serverBaseUrl = valueOf("--server") || process.env.ATEL_MCP_SERVER_BASE_URL || "https://atelai.xyz";
 const platformBaseUrl = valueOf("--platform") || process.env.ATEL_PLATFORM_BASE_URL || "https://api.atelai.xyz";
 

@@ -6,6 +6,7 @@ import {
   AckInputSchema,
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  DashboardAuthInputSchema,
   RecoverInputSchema,
   RegisterEndpointInputSchema,
   RegisterUserInputSchema,
@@ -124,6 +125,7 @@ export async function createAtelMcpServer(args: {
   server.registerTool('atel_agent_register', { description: 'Register or update the current ATEL agent profile.', inputSchema: AgentRegisterInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_agent_register', input));
   server.registerTool('atel_agent_search', { description: 'Search registered ATEL agents by capability or identity.', inputSchema: AgentSearchInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_agent_search', input));
   server.registerTool('atel_register_endpoint', { description: 'Advertise an HTTPS callback URL the platform can use to push async events. Server validates HTTPS + reachability (HEAD probe) before persisting. SDK / OpenClaw / self-hosted agents need this; pure MCP-only users can skip and poll atel_inbox_list instead.', inputSchema: RegisterEndpointInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_register_endpoint', input));
+  server.registerTool('atel_dashboard_auth', { description: 'Authorize a Dashboard /login session. User opens https://atelai.xyz/login, sees a 6-character code (e.g. VX42WY), and tells you "atel auth VX42WY" (or similar phrasing). Call this tool with that code; server forwards to the plugin listener which signs locally with the user identity and posts to platform /auth/v1/verify. On success the user\'s browser auto-jumps to /dashboard.', inputSchema: DashboardAuthInputSchema.shape }, async (input) => tryInvoke(invoke, 'atel_dashboard_auth', input));
   server.registerTool('atel_balance', { description: 'Return current ATEL account balances.' }, async () => tryInvoke(invoke, 'atel_balance'));
   server.registerTool('atel_deposit_info', { description: 'Return supported deposit chains and addresses.' }, async () => tryInvoke(invoke, 'atel_deposit_info'));
   server.registerTool('atel_wallet_status', { description: 'Poll wallet deployment progress after atel_register_user. Returns {status:pending|partial|ready, chainAddresses, hint}. Poll every 3-5s until status=ready before placing paid orders.' }, async () => tryInvoke(invoke, 'atel_wallet_status'));

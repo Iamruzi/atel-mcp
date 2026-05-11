@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import { pushEvent } from "./inbox.js";
 import { dispatchEvent } from "./tg-dispatch.js";
 import { autoActOnPushEvent } from "./poll-loop.js";
+import { dashboardAuth } from "./tool.js";
 
 const _here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -98,6 +99,63 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ ok: true, service: "atel-mcp-openclaw-listener" }));
+      return;
+    }
+
+    // POST /dashboard-auth — atel-mcp server proxies LLM tool calls to here
+    // because the plugin needs the user's local identity.json secret key to
+    // sign the dashboard /login challenge. The server can't sign locally
+    // (no private key), and the plugin-registered "atel_mcp" tool was
+    // silently dropped by OpenClaw loader after 2026-05-07. So we expose
+    // dashboard_auth as a listener HTTP endpoint, called from server-side
+    // `atel_dashboard_auth` tool, which the LLM sees through mcp.servers
+    // transport.
+    //
+    // Auth: HMAC over `timestamp\ncode` using the same hmacSecret as relay
+    // push, so only atel-mcp server (which knows the per-agent secret via
+    // register_endpoint) can call this endpoint. Without HMAC, anyone on
+    // the public internet could submit auth codes for any agent on this box.
+    if (req.method === "POST" && (req.url || "").startsWith("/dashboard-auth")) {
+      const chunks0 = [];
+      req.on("data", (c) => chunks0.push(c));
+      req.on("end", async () => {
+        try {
+          const raw = Buffer.concat(chunks0).toString("utf-8");
+          let body;
+          try { body = JSON.parse(raw || "{}"); } catch {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ ok: false, error: "INVALID_JSON" }));
+            return;
+          }
+          const code = String(body?.code || "").trim();
+          const ts = String(req.headers["x-atel-timestamp"] || "");
+          const providedHmac = String(req.headers["x-atel-push-hmac"] || "");
+          if (hmacSecret) {
+            const mac = crypto.createHmac("sha256", hmacSecret);
+            mac.update(ts);
+            mac.update("\n");
+            mac.update(code);
+            const expected = mac.digest("hex");
+            if (providedHmac !== expected) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ ok: false, error: "HMAC_MISMATCH" }));
+              return;
+            }
+          }
+          if (!identityPath || !platformBaseUrl) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: "LISTENER_NOT_CONFIGURED", message: "identityPath / platformBaseUrl not passed to startListener" }));
+            return;
+          }
+          const result = await dashboardAuth({ identityPath, platformBaseUrl }, code);
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ ok: false, error: "INTERNAL", message: (e && e.message) || String(e) }));
+        }
+      });
       return;
     }
     // Platform's relay-push dispatcher POSTs to <endpoint><path>, where

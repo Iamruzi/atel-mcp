@@ -1,7 +1,13 @@
 import { z } from 'zod';
 
-export const DidSchema = z.string().min(1).startsWith('did:atel:');
-export const OrderIdSchema = z.string().min(1).startsWith('ord-');
+// 2026-05-11: do NOT use .startsWith() — zod 4 compiles it to a JSON Schema
+// pattern that escapes `:` and `-` as `\:` / `\-`, which are invalid escapes
+// under the JS RegExp `u` flag. OpenClaw / MCP clients that compile the
+// pattern with `u` flag will throw, blocking the tool. Use raw regex
+// literals so the source string is exact and free of escape artifacts.
+// Tester report 2026-05-11 hit this on atel_send_message + atel_order_create.
+export const DidSchema = z.string().min(1).regex(/^did:atel:/, 'DID must start with did:atel:');
+export const OrderIdSchema = z.string().min(1).regex(/^ord-/, 'orderId must start with ord-');
 
 export const WhoamiOutputSchema = z.object({
   did: DidSchema,
@@ -22,6 +28,16 @@ export const RegisterUserInputSchema = z.object({
 // http://, non-prod ATEL_ENV_PROFILE=development|staging|test accepts it).
 // Client-side we only require a valid http(s) URL — non-http schemes
 // (ftp://, ws://, file://) would always fail server-side, so reject early.
+// Dashboard /login auth code. 4-12 uppercase alphanumeric, displayed at
+// https://atelai.xyz/login for the user to paste to their lobster.
+// 2026-05-11: server-side counterpart of plugin-side dashboard_auth action.
+// Plugin's atel_mcp tool registration was silently dropped by OpenClaw
+// loader after 2026-05-07; this server-side tool surfaces via mcp.servers
+// transport and proxies to the plugin listener for the local signing step.
+export const DashboardAuthInputSchema = z.object({
+  code: z.string().min(4).max(12).regex(/^[A-Z0-9]+$/, 'code must be 4-12 uppercase alphanumeric characters (e.g. VX42WY)'),
+});
+
 export const RegisterEndpointInputSchema = z.object({
   endpoint: z.string().url().regex(/^https?:\/\//, 'endpoint must be http:// or https://'),
   label: z.string().min(1).max(64).optional()
@@ -248,7 +264,10 @@ export const AuditRequestQueryInputSchema = z.object({
 //   send any number, the tool enforces 30. The infamous漂移 case:
 //   SKILL.md says "use 30", LLM uses 5 default, misses Boxer at position 7.
 
-const A2bIntentIdSchema = z.string().min(1).startsWith('intent_');
+// Avoid .startsWith() — see DidSchema comment above. Tester report 2026-05-11
+// confirmed atel_a2b_purchase_get / lock_funds / execute_purchase all blocked
+// by `^intent\_` invalid escape under JS RegExp `u` flag.
+const A2bIntentIdSchema = z.string().min(1).regex(/^intent_/, 'intentId must start with intent_');
 
 export const A2bSearchInputSchema = z.object({
   query: z.string().min(1).max(200),

@@ -282,7 +282,7 @@ async function parseMcpPayload(response) {
 // browser-side poll completes and the user lands on /dashboard
 // authenticated as this DID.
 
-async function dashboardAuth(config, code) {
+export async function dashboardAuth(config, code) {
   const trimmed = String(code || "").trim().toUpperCase();
   if (!trimmed || !/^[A-Z0-9]{4,12}$/.test(trimmed)) {
     return {

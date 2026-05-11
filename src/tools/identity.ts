@@ -1,6 +1,7 @@
 import {
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  DashboardAuthInputSchema,
   RecoverInputSchema,
   RegisterEndpointInputSchema,
   RegisterUserInputSchema,
@@ -9,7 +10,7 @@ import {
   RuntimeLinkStatusOutputSchema,
   WhoamiOutputSchema,
 } from '../contracts/schemas.js';
-import { recoverIdentity, recoverSecretKey, registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
+import { getAgent, recoverIdentity, recoverSecretKey, registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
 import { getRuntimeLink, removeRuntimeLink, upsertRuntimeLink } from '../runtime-links/store.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
@@ -133,6 +134,74 @@ export async function atelRegisterEndpoint(ctx: ToolExecutionContext, input: unk
   requireScope(ctx, 'identity.read');
   const parsed = RegisterEndpointInputSchema.parse(input);
   return registryUpdateEndpoint(ctx, parsed);
+}
+
+/**
+ * Dashboard /login authorization (server-side proxy).
+ *
+ * Plugin's original `atel_mcp action=dashboard_auth` was an OpenClaw-plugin-
+ * registered tool that the loader silently dropped after 2026-05-07. To keep
+ * dashboard login working over the mcp.servers transport, we expose
+ * `atel_dashboard_auth` server-side. Because the signing step needs the
+ * user's local identity.json private key (the server has none), we look up
+ * the agent's registered listener endpoint and POST the code to its
+ * `/dashboard-auth` route. The listener signs locally, calls
+ * /auth/v1/verify, and returns the verdict.
+ *
+ * Auth chain: caller's DID-Sig JWT → server lookup of their own agent row
+ * → call agent's listener endpoint. We never trust a different DID's
+ * endpoint here — the listener call always targets ctx.session.did.
+ *
+ * Tester report 2026-05-11 §4.2 surfaced this gap.
+ */
+export async function atelDashboardAuth(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'identity.read');
+  const parsed = DashboardAuthInputSchema.parse(input);
+
+  const agent = (await getAgent(ctx, ctx.session.did)) as { endpoint?: string } | null;
+  if (!agent || typeof agent.endpoint !== 'string' || agent.endpoint.length === 0) {
+    throw new AtelMcpError(
+      'PREREQUISITE_NOT_MET',
+      'Your agent has no registered listener endpoint. Run the plugin install / register_endpoint first.',
+      { did: ctx.session.did, missing: 'endpoint' },
+      'Re-run `npx -y atel-mcp-openclaw` so the plugin can register its listener endpoint with platform.',
+    );
+  }
+
+  const target = agent.endpoint.replace(/\/$/, '') + '/dashboard-auth';
+  let response: Response;
+  try {
+    response = await fetch(target, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-atel-timestamp': new Date().toISOString(),
+      },
+      body: JSON.stringify({ code: parsed.code }),
+    });
+  } catch (e) {
+    throw new AtelMcpError(
+      'UPSTREAM_ERROR',
+      `Could not reach plugin listener at ${target}: ${(e as Error).message}`,
+      { endpoint: target, kind: 'listener_unreachable' },
+      'Make sure the lobster runtime is online and the listener (port 3101 by default) is reachable from this MCP server.',
+    );
+  }
+
+  const raw = await response.text();
+  let payload: unknown;
+  try { payload = raw ? JSON.parse(raw) : null; } catch { payload = { raw }; }
+
+  if (!response.ok) {
+    throw new AtelMcpError(
+      'UPSTREAM_ERROR',
+      `Listener returned ${response.status}`,
+      { status: response.status, body: payload, kind: 'listener_error' },
+      'Plugin listener rejected the dashboard auth request. Check the lobster runtime logs.',
+    );
+  }
+
+  return payload;
 }
 
 /** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */
