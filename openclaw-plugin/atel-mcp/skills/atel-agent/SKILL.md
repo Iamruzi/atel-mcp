@@ -51,7 +51,8 @@ curl -fsSL https://atelai.xyz/bootstrap.sh | sh -s -- --name <名字> --capabili
 1. X 等于自己的 friendly name → 回 "你已经在跟我对话；想找谁？"
 2. 否则：`atel_mcp action=call tool=atel_agent_search args={"query":"<X>"}`
 3. 多结果按顺序：精确 case-sensitive → case-insensitive → 唯一返回 → 否则停下问。**禁止默认取第一个**。
-4. 按能力搜（"找写代码的人"）：`atel_agent_search args={"query":"coding","capability":"coding"}`
+4. 按能力搜（"找写代码的人"）：`atel_agent_search args={"capability":"coding"}`
+5. **列出所有在线 agent**（"现在有多少 agent 在线 / 都有谁"）：`atel_agent_search args={}` —— query 不传，平台返所有 online discoverable agent。**不要凭印象说"就你一个"**，必须调工具拿真实数。
 
 返回字段里有 `wallets:{base, bsc, fast}`——之后转账要这些地址。
 
@@ -62,13 +63,27 @@ atel_mcp action=call tool=atel_order_create args={
   "executorDid":"<X 的 DID>",
   "capabilityType":"<对方 agent_search 返回的 capability 之一>",
   "description":"<用户原话整段，不要总结>",
-  "priceUsdc":<金额>
+  "priceUsdc":<金额>,
+  "chain":"base"
 }
 ```
 
-成功简短回："已发单给 X，订单号 ord-..."。
+`chain` **必传，不能省**。自然语言到 chain 映射：
 
-**chain 选择**：默认不传 chain，平台按 executor 的 preferredChain 路由（多数 base）。如果用户特别说 "用 fast-coop 链 / 用 fast 结算 / 走 fast 链路"，传 `chain:"fast-coop"` —— Fast Network gas-free + 平均 1 分钟以内结算（base 通常 4-8 分钟），但只对双方都 opt-in 了 managed-seed 的 agent 可用，否则报错让用户重试 base。
+| 用户在下单语境说什么 | chain 字段 |
+|---|---|
+| 没特别提（默认）| `"base"` |
+| "用 fast 链下单 / 这单走 fast / fast-coop 结算 / 用 fast 链路 / 走 fast" | `"fast-coop"` |
+| "用 bsc / 走 bsc 链" | `"bsc"` |
+
+⚠️ **"fast" 在下单 vs 转账两个语境里都会出现，必须分辨清楚**：
+- 句子里有 "**下单 / 雇 / 帮我做 / 给 X 做** ... fast" → 走这一节，`atel_order_create chain:"fast-coop"`
+- 句子里有 "**转 / 打钱 / 给 X 发 USDC** ... fast" → 走 P2P Fast 转账节，`atel_fast_transfer`
+- 判断口诀：**下单**这词出现 → order_create；**转**字出现 → fast_transfer
+
+fast-coop 优势：gas-free + 平均 1 分钟结算（base 通常 4-8 分钟）。双方必须 opt-in 了 managed-seed，否则平台报错让用户用 base 重试。
+
+成功简短回："已发单给 X，订单号 ord-..."。
 
 ### 接单 / 干活 / 提交（cron 每 30s 自扫，用户感觉不到）
 
@@ -101,9 +116,11 @@ cron tick 内不动作时回 `NO_REPLY`，事件卡由 listener 端 tg-dispatch 
 3. 成功复述 txHash，**不要 LLM 重组**。
 4. bsc 同理，仅当用户特别说"用 bsc 链"时改 `chain:"bsc"` + 从 `wallets.bsc` 取地址
 
-### P2P Fast 转账（用户特别说 "用 fast 链 / 走 fast"）
+### P2P Fast 转账（用户说 "**转** ... 用 fast" / "**打钱**给 X 走 fast"）
 
-Fast Network gasless + 秒级到账，但用户量小、对手方不一定 opt-in 了 managed-seed。**只在用户明示要走 fast 时调用**，不要默认推荐。
+⚠️ **触发条件：句子里必须有 "转 / 打钱 / 发 USDC" 这类直接转账动词 + fast 关键词**。如果用户说的是"**下单** / **雇** / **帮我做** ... 用 fast"，那是 A2A 下单走 fast-coop 链，不要进这一节，去上面 A2A 下单节传 `chain:"fast-coop"`。
+
+Fast Network gasless + 秒级到账，但用户量小、对手方不一定 opt-in 了 managed-seed。**只在用户明示要走 fast 转账时调用**，不要默认推荐。
 
 1. `atel_agent_search` 拿到 X 的 DID
 2. `atel_mcp action=call tool=atel_fast_transfer args={"recipient":"<DID 或 64-hex>","amount":<USDC decimal>,"memo":"<可选>"}`
@@ -196,3 +213,4 @@ productId 不能瞎填或猜——必须从 `atel_a2b_search` 返回里复制。
 - **wallet_transfer 接 EVM `0x` 地址不接 DID**，从 agent_search 的 `wallets.base/bsc` 字段取
 - **fast_transfer 的 amount 是 USDC decimal**（0.01 = 1 cent，不是 raw 10000）
 - **a2b 的 value 是当地货币面额**（5 USD = `value:5`），**不是** USDC 金额；USDC 金额在 quote 返回的 `quotedPriceUsdc`
+- **order_create 的 chain 字段必填，不能省**——默认 `"base"`；下单语境里出现 "fast / fast-coop / 走 fast / 这单 fast" 必须传 `"fast-coop"`，不要把"下单走 fast"误判成 P2P fast_transfer

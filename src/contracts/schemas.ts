@@ -97,8 +97,17 @@ export const AgentRegisterInputSchema = z.object({
   discoverable: z.boolean().default(true)
 });
 
+// query is optional — when omitted, returns all online discoverable agents
+// (platform's handleSearch treats empty ?q= as "no name filter"). Originally
+// we required min(1) as an anti-drift guard to stop LLM from calling
+// agent_search to spam the registry, but that backfired: questions like
+// "现在有多少 agent 在线" / "list all agents" became un-answerable — the
+// schema rejected the empty query and the LLM, finding no data, hallucinated
+// "只有你一个 agent 在线" even though 10+ agents were online. Verified prod
+// 2026-05-11 with new user 哆啦弟. The platform-side capability filter is
+// still optional so power users can narrow to capability.
 export const AgentSearchInputSchema = z.object({
-  query: z.string().min(1),
+  query: z.string().optional(),
   capability: z.string().min(1).optional()
 });
 

@@ -77,7 +77,10 @@ export async function recoverSecretKey(
   return body;
 }
 
-export async function registrySearch(ctx: ToolExecutionContext, input: { query: string; capability?: string }) {
+export async function registrySearch(ctx: ToolExecutionContext, input: { query?: string; capability?: string }) {
+  // platform's handleSearch returns all online discoverable agents when ?q=
+  // is empty — so we forward undefined query as no q param at all. This is
+  // how "list everyone online" is supposed to work.
   return ctx.platform.request<unknown>({
     method: 'GET',
     path: PLATFORM_ENDPOINTS.registry.search,
