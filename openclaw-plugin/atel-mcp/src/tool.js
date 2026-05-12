@@ -313,19 +313,31 @@ export async function dashboardAuth(config, code) {
   });
   const body = await readJson(response);
   if (!response.ok) {
+    const bodyStr = JSON.stringify(body || {}).toLowerCase();
+    // 2026-05-13 tester report 10A.2: when plugin is in pull mode (no
+    // public HTTPS endpoint registered), platform can't reach the listener
+    // to deliver the dashboard auth grant and returns listener_unreachable.
+    // Surface the actionable hint instead of just the cryptic platform
+    // error — the user needs to know to set up an HTTPS endpoint.
+    const listenerUnreachable =
+      bodyStr.includes("listener_unreachable") ||
+      bodyStr.includes("could not reach plugin listener") ||
+      bodyStr.includes("listener unreachable");
     return {
       ok: false,
       error: body?.error || `verify_failed_${response.status}`,
       status: response.status,
-      hint: response.status === 404
-        ? "code not found — make sure the code came from atelai.xyz/login and is fresh (5min window)"
-        : response.status === 410
-          ? "code expired — open atelai.xyz/login again to mint a new one"
-          : response.status === 409
-            ? "code already used — open atelai.xyz/login again to mint a new one"
-            : response.status === 401
-              ? "signature invalid — try again with same code; if persists, identity drift"
-              : null,
+      hint: listenerUnreachable
+        ? "platform can't reach this agent's listener — most likely you're in pull mode because no HTTPS endpoint is registered. Dashboard Auth requires the platform to push to a reachable https:// URL. Options: (a) Cloudflare named tunnel, (b) Caddy/nginx HTTPS reverse proxy, (c) Tailscale Funnel. Set ATEL_RELAY_PUBLIC_URL=https://your-host then restart the gateway."
+        : response.status === 404
+          ? "code not found — make sure the code came from atelai.xyz/login and is fresh (5min window)"
+          : response.status === 410
+            ? "code expired — open atelai.xyz/login again to mint a new one"
+            : response.status === 409
+              ? "code already used — open atelai.xyz/login again to mint a new one"
+              : response.status === 401
+                ? "signature invalid — try again with same code; if persists, identity drift"
+                : null,
     };
   }
   return {
@@ -533,6 +545,38 @@ export async function sendMcpRequestForRuntime(runtime, method, params) {
 //   - `{ noEvents: true, mode, idle }` when nothing pending → agent should noop
 //   - `{ events: [...], mode, count }` when events exist → agent acts on them
 async function pollEvents(runtime) {
+  // Plan 2 (2026-05-12): if a fresh install is in progress, short-circuit
+  // to {noEvents:true} regardless of inbox state. Cron tick wakes the LLM
+  // every ~30s; during the 60-120s install window we don't want it to
+  // see an empty inbox + start reasoning about onboarding state (that's
+  // exactly the loop that produced hallucinated "registered as ..."
+  // outputs). The marker is owned by bootstrap.sh / install.js; we trust
+  // it as the source of truth here. Stale check (>5min): treat as no
+  // longer in-progress and proceed normally, so a crashed installer
+  // doesn't wedge the agent forever.
+  try {
+    const home = process.env.HOME || process.env.USERPROFILE || ".";
+    const openclawHome = process.env.OPENCLAW_HOME || path.join(home, ".openclaw");
+    const marker = path.join(openclawHome, ".atel-install-in-progress");
+    if (fs.existsSync(marker)) {
+      let stale = false;
+      try {
+        const m = JSON.parse(fs.readFileSync(marker, "utf8"));
+        const started = m.updated_at || m.started_at;
+        if (started) {
+          const ageMs = Date.now() - new Date(started).getTime();
+          if (ageMs > 5 * 60 * 1000) stale = true;
+        }
+      } catch { /* malformed marker treated as fresh — safer than races */ }
+      if (!stale) {
+        return { noEvents: true, mode: "install-in-progress", idle: true, installing: true };
+      }
+      // Stale marker — clean it up so the LLM gets normal poll results
+      // and the user is not blocked by a crashed installer.
+      try { fs.unlinkSync(marker); } catch {}
+    }
+  } catch { /* marker check is best-effort; never block normal polling */ }
+
   const config = readPluginConfig(runtime);
   const identity = JSON.parse(fs.readFileSync(resolveIdentityPath(config.identityPath), "utf8"));
   const did = identity.did;

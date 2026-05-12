@@ -202,10 +202,13 @@ export async function setupReverseChannel(runtime, config) {
   // fails (e.g. ufw blocks 3101 inbound) the call returns isError and we
   // fall back to pull mode (listener still running, just not reachable).
   let endpointOk = false;
+  let registerFailReason = "";
   try {
     const result = await callRegisterEndpoint(runtime, url);
     if (result?.isError) {
-      console.warn(`[atel-mcp/setup] register_endpoint failed: ${JSON.stringify(result)} — falling back to pull mode`);
+      const detail = JSON.stringify(result).slice(0, 400);
+      registerFailReason = detail.includes("must start with https") ? "https_required" : "register_rejected";
+      console.warn(`[atel-mcp/setup] register_endpoint failed: ${detail} — falling back to pull mode`);
       pluginMode = "pull";
     } else {
       console.log(`[atel-mcp/setup] reverse channel armed (push mode) — endpoint=${url}`);
@@ -213,10 +216,27 @@ export async function setupReverseChannel(runtime, config) {
       endpointOk = true;
     }
   } catch (err) {
+    registerFailReason = "register_threw";
     console.warn(`[atel-mcp/setup] register_endpoint threw (${err && err.message}) — falling back to pull mode`);
     pluginMode = "pull";
   }
 
   if (endpointOk) return { mode: "push", url };
-  return { mode: "pull", reason: "register_endpoint_failed_or_threw", url };
+
+  // 2026-05-13 tester report 10A.2: in production, register_endpoint
+  // rejects http:// URLs. Plugin correctly falls back to pull mode, but
+  // the user is left with Dashboard Auth failing ("listener_unreachable")
+  // with no idea what to do. Surface the next-step guidance into the
+  // logs (install.js / TG success card will mirror it) so a non-ops
+  // user knows their options.
+  if (registerFailReason === "https_required") {
+    console.warn("[atel-mcp/setup] production requires an https:// endpoint for Dashboard Auth and platform → plugin push.");
+    console.warn("[atel-mcp/setup] options for getting one:");
+    console.warn("  (a) Cloudflare named tunnel (persistent) — `cloudflared tunnel route dns ... && cloudflared tunnel run`");
+    console.warn("  (b) Caddy / nginx HTTPS reverse proxy in front of the local listener");
+    console.warn("  (c) Tailscale Funnel (`tailscale funnel http://127.0.0.1:" + port + "`)");
+    console.warn(`  Then set ATEL_RELAY_PUBLIC_URL=https://your-public-host and re-run \`npx atel-mcp-openclaw@latest\` (or just restart the gateway).`);
+    console.warn("  Until an https endpoint is set, the agent runs in pull-only mode — fine for P2P/A2A/A2B, but Dashboard Auth + low-latency push events will not work.");
+  }
+  return { mode: "pull", reason: registerFailReason || "register_endpoint_failed_or_threw", url };
 }

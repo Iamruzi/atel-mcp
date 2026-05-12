@@ -24,6 +24,23 @@ function has(name) {
 }
 function die(message) {
   console.error(`error: ${message}`);
+  // Plan 2: install owns user-facing failure notification. emergencyFinalize
+  // is a function declaration referenced by hoisting via const-style
+  // assignment below — it may not be defined yet at the very first die()
+  // call (config-missing line ~207 runs after helpers, so this is fine in
+  // practice; guard with try/catch in case of refactor regressions).
+  try {
+    if (typeof sendTelegramCardSync === "function") {
+      sendTelegramCardSync(
+        `❌ ATEL 注册失败\n` +
+        `\n` +
+        `<code>${String(message).slice(0, 500)}</code>\n` +
+        `\n` +
+        `稍后重试同样的注册命令即可。多次失败请把错误发给管理员。`
+      );
+    }
+  } catch {}
+  try { if (typeof clearInProgressSync === "function") clearInProgressSync(); } catch {}
   process.exit(1);
 }
 function firstFile(candidates) {
@@ -146,6 +163,151 @@ const identityPath = valueOf("--identity") || process.env.ATEL_IDENTITY_PATH || 
 ]) || path.join(home, "atel-workspace", ".atel", "identity.json");
 const serverBaseUrl = valueOf("--server") || process.env.ATEL_MCP_SERVER_BASE_URL || "https://atelai.xyz";
 const platformBaseUrl = valueOf("--platform") || process.env.ATEL_PLATFORM_BASE_URL || "https://api.atelai.xyz";
+
+// ---- Plan 2 (2026-05-12): in-progress marker + direct TG completion ----
+// The host LLM is taken out of the 60-120s install loop. bootstrap.sh writes
+// the marker as its first action; this script keeps it fresh while running,
+// and removes it (plus pushes a TG card to the user) on success OR failure.
+// plugin/poll_events short-circuits while the marker exists so the LLM
+// never wakes inside the install window and cannot hallucinate progress.
+const inProgressMarker = path.join(openclawHome, ".atel-install-in-progress");
+function writeInProgress(stage, extra) {
+  try {
+    fs.mkdirSync(openclawHome, { recursive: true });
+    let cur = {};
+    try { cur = JSON.parse(fs.readFileSync(inProgressMarker, "utf8")); } catch {}
+    const next = {
+      ...cur,
+      started_at: cur.started_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      pid: process.pid,
+      stage,
+      ...(extra || {}),
+    };
+    const tmp = inProgressMarker + ".tmp-" + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
+    fs.renameSync(tmp, inProgressMarker);
+  } catch (e) {
+    console.warn(`[atel-mcp/install] cannot update ${inProgressMarker}: ${e.message}`);
+  }
+}
+function clearInProgressSync() {
+  try { fs.unlinkSync(inProgressMarker); } catch {}
+}
+
+// Walk openclaw.json for any `botToken` value, resolving ${VAR} placeholders.
+function resolveBotToken() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const stack = [cfg];
+    while (stack.length) {
+      const cur = stack.pop();
+      if (!cur || typeof cur !== "object") continue;
+      if (typeof cur.botToken === "string" && cur.botToken) {
+        let tok = cur.botToken;
+        const m = tok.match(/^\$\{([A-Z_][A-Z0-9_]*)\}$/);
+        if (m) tok = process.env[m[1]] || "";
+        if (tok && /^\d+:/.test(tok)) return tok;
+      }
+      for (const v of Object.values(cur)) if (v && typeof v === "object") stack.push(v);
+    }
+  } catch {}
+  return "";
+}
+
+// Resolve target TG chat id for the install card. Order:
+//   1. --tg-chat-id / --tg-chat CLI arg
+//   2. ATEL_USER_TG_CHAT env var
+//   3. tg_chat_id seeded into the marker by bootstrap.sh
+function resolveTgChatId() {
+  const fromArg = valueOf("--tg-chat-id") || valueOf("--tg-chat");
+  if (fromArg) return String(fromArg);
+  if (process.env.ATEL_USER_TG_CHAT) return String(process.env.ATEL_USER_TG_CHAT);
+  try {
+    const m = JSON.parse(fs.readFileSync(inProgressMarker, "utf8"));
+    if (m && m.tg_chat_id) return String(m.tg_chat_id);
+  } catch {}
+  return "";
+}
+
+// Synchronous TG card push via curl. We use sync to keep die() simple and
+// guarantee delivery before process.exit. Failures are logged but do not
+// block exit — stdout still has the same info for the operator.
+function sendTelegramCardSync(text) {
+  const token = resolveBotToken();
+  const chatId = resolveTgChatId();
+  if (!token || !chatId) {
+    console.warn(`[atel-mcp/install] TG card not sent (token=${token ? "ok" : "missing"} chat=${chatId || "missing"})`);
+    return false;
+  }
+  try {
+    execFileSync("curl", [
+      "-fsS", "-X", "POST",
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      "-H", "content-type: application/json",
+      "--data", JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      }),
+    ], { stdio: ["ignore", "ignore", "ignore"], timeout: 8000 });
+    return true;
+  } catch (e) {
+    console.warn(`[atel-mcp/install] TG sendMessage failed: ${e.message}`);
+    return false;
+  }
+}
+
+// Best-effort gateway restart so the LLM sees the freshly registered
+// mcp.servers.atel tools in its next turn. Try user-level systemd, system
+// systemd, then pm2 — first success wins.
+function restartGatewayBestEffort() {
+  for (const [bin, argv] of [
+    ["systemctl", ["--user", "restart", "openclaw-gateway"]],
+    ["systemctl", ["restart", "openclaw-gateway"]],
+    ["pm2", ["restart", "openclaw-gateway"]],
+  ]) {
+    try {
+      execFileSync(bin, argv, { stdio: "ignore", timeout: 10000 });
+      console.log(`[atel-mcp/install] restarted gateway via ${bin} ${argv.join(" ")}`);
+      return true;
+    } catch {}
+  }
+  console.warn("[atel-mcp/install] could not restart openclaw-gateway via systemctl/pm2 — operator must restart manually");
+  return false;
+}
+
+// Crash-net: any uncaught error pushes the failure card and clears marker.
+// Without this, an exception in npm install / fetch / config parse would
+// leave the marker stuck and never tell the user anything went wrong.
+function emergencyFinalize(label, err) {
+  const msg = err && err.message ? err.message : String(err || "unknown");
+  console.error(`[atel-mcp/install] ${label}: ${msg}`);
+  try {
+    sendTelegramCardSync(
+      `❌ ATEL 注册失败\n` +
+      `\n` +
+      `阶段: <code>${label}</code>\n` +
+      `错误: <code>${msg.slice(0, 500)}</code>\n` +
+      `\n` +
+      `稍后重试同样的注册命令即可。多次失败请把错误发给管理员。`
+    );
+  } catch {}
+  clearInProgressSync();
+}
+// Only attach the handlers + write the marker for the install path. wash
+// and upload-seed subcommands must NOT touch the marker (wash explicitly
+// undoes state, upload-seed is independent). They also don't push TG
+// cards because there's no user-facing onboarding event to report.
+const isInstallRun = !subcommand;
+if (isInstallRun) {
+  process.on("uncaughtException", (err) => { emergencyFinalize("uncaughtException", err); process.exit(1); });
+  process.on("unhandledRejection", (err) => { emergencyFinalize("unhandledRejection", err); process.exit(1); });
+  // First marker write — picks up the JSON that bootstrap.sh seeded if it
+  // exists, augments with pid + stage. Idempotent re-entry.
+  writeInProgress("install.js:starting");
+}
 
 // Friendly agent name written to platform's agents.name. Without this we'd
 // fall back to whatever the SDK seeded (often "agent-${hostname}" — that
@@ -282,6 +444,9 @@ if (subcommand === "wash") {
     path.join(openclawHome, "cron", "jobs.json"),
     path.join(openclawHome, "atel-mcp-did-sig-cache.json"),
     path.join(openclawHome, "atel-mcp-inbox"),
+    // Plan 2 marker — wash should leave the system in a clean state, no
+    // stale install marker that would short-circuit poll_events later.
+    path.join(openclawHome, ".atel-install-in-progress"),
     // identity is wiped in default location only — if user passed --identity,
     // that's their custody, don't touch.
     !valueOf("--identity") ? path.join(home, "atel-workspace", ".atel", "identity.json") : null,
@@ -382,24 +547,103 @@ if (subcommand === "upload-seed") {
 }
 
 fs.mkdirSync(extensionsDir, { recursive: true });
+
+// Robust dir nuke. fs.rmSync chokes with ENOTEMPTY on deeply nested
+// node_modules paths (verified 2026-05-12 on racknerd vps with the
+// @mariozechner/pi-coding-agent/examples/extensions tree). Cascade
+// through fs.rmSync (with retries) → shell `rm -rf` → `find -depth
+// -delete`. The shell tools succeed in cases node's rimraf gives up.
+function nukeDir(dir) {
+  if (!fs.existsSync(dir)) return;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (!fs.existsSync(dir)) return;
+  } catch (e) {
+    console.warn(`[atel-mcp/install] fs.rmSync ${dir} failed (${e.code || e.message}); falling back to rm -rf`);
+  }
+  try {
+    execFileSync("rm", ["-rf", dir], { stdio: "ignore" });
+    if (!fs.existsSync(dir)) return;
+  } catch (e) {
+    console.warn(`[atel-mcp/install] rm -rf failed (${e.message}); falling back to find -depth -delete`);
+  }
+  try {
+    execFileSync("find", [dir, "-depth", "-delete"], { stdio: "ignore" });
+  } catch (e) {
+    console.warn(`[atel-mcp/install] find -delete also failed: ${e.message}`);
+  }
+}
+
+// Concurrency lock. Reason: bootstrap.sh launches `npx -y` in a detached
+// background process. If the LLM panics on a transient output and re-runs
+// bootstrap (or the user reruns), multiple `npm install` processes hit
+// the same extensionDir, stomp each other's node_modules tree, and
+// produce ENOTEMPTY everywhere. The lock detects an in-progress install
+// and aborts cleanly so the LLM gets a clear "another install is
+// running" signal instead of corrupting fs.
+const lockPath = path.join(extensionsDir, ".atel-mcp-install.lock");
+function acquireLock() {
+  try {
+    fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+  } catch (e) {
+    if (e.code === "EEXIST") {
+      let stalePid = -1;
+      try { stalePid = parseInt(fs.readFileSync(lockPath, "utf8"), 10); } catch {}
+      let alive = false;
+      if (stalePid > 0) {
+        try { process.kill(stalePid, 0); alive = true; } catch {}
+      }
+      if (alive) {
+        console.error(`[atel-mcp/install] another install is in progress (pid=${stalePid}); aborting to avoid fs corruption. If you believe this is stuck, run: rm ${lockPath}`);
+        process.exit(2);
+      }
+      console.warn(`[atel-mcp/install] stale lock from dead pid=${stalePid}; clearing`);
+      try { fs.unlinkSync(lockPath); } catch {}
+      fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+    } else { throw e; }
+  }
+  const cleanup = () => { try { fs.unlinkSync(lockPath); } catch {} };
+  process.on("exit", cleanup);
+  process.on("SIGINT", () => { cleanup(); process.exit(130); });
+  process.on("SIGTERM", () => { cleanup(); process.exit(143); });
+}
+acquireLock();
+
 const backup = `${configPath}.bak-atel-mcp-${new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14)}`;
 fs.copyFileSync(configPath, backup);
-fs.rmSync(extensionDir, { recursive: true, force: true });
-// Wipe any pre-rename install at the legacy path so OpenClaw doesn't
-// load the same plugin twice (once under each id) on next gateway start.
+nukeDir(extensionDir);
 if (fs.existsSync(legacyExtensionDir)) {
-  fs.rmSync(legacyExtensionDir, { recursive: true, force: true });
+  nukeDir(legacyExtensionDir);
 }
 fs.cpSync(packageRoot, extensionDir, { recursive: true });
 
-try {
-  execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], {
-    cwd: extensionDir,
-    stdio: "inherit",
-  });
-} catch (error) {
-  die(`npm install failed in ${extensionDir}: ${error.message}`);
+// npm install with one retry. First-attempt failures are almost always
+// ENOTEMPTY from a half-extracted extensionDir (npm's own rimraf hits
+// the same nested-dir issue). We nuke + recopy + retry once. If both
+// fail, die with an actionable hint pointing the operator at the exact
+// commands to recover by hand.
+function runNpmInstall() {
+  try {
+    execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], {
+      cwd: extensionDir,
+      stdio: "inherit",
+    });
+    return;
+  } catch (firstError) {
+    console.warn(`[atel-mcp/install] first npm install attempt failed (${firstError.message}); cleaning extensionDir + retrying once`);
+  }
+  nukeDir(extensionDir);
+  fs.cpSync(packageRoot, extensionDir, { recursive: true });
+  try {
+    execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], {
+      cwd: extensionDir,
+      stdio: "inherit",
+    });
+  } catch (secondError) {
+    die(`npm install failed twice (final: ${secondError.message}). Recovery: rm -rf ${extensionDir} ~/.npm/_cacache && npx -y atel-mcp-openclaw@latest ...`);
+  }
 }
+runNpmInstall();
 
 // Identity generation now runs AFTER npm install so that tweetnacl + bs58
 // are guaranteed present in extensionDir/node_modules.
@@ -990,3 +1234,21 @@ console.log("   3. Send a natural-language order request, e.g.: \"找 someone �
 console.log("=================================================================");
 console.log("");
 console.log(`(debug: config=${configPath}  backup=${backup}  extension=${extensionDir})`);
+
+// Plan 2 finalization: push success card to the user's TG chat directly,
+// clear the in-progress marker, restart the gateway. After this point the
+// host LLM is allowed to wake again (poll_events will start returning
+// real data). We do this *after* the stdout summary so failures here
+// don't lose the operator-visible info.
+const successCard =
+  `✅ ATEL 注册完成\n` +
+  `\n` +
+  `名称: <b>${agentName}</b>\n` +
+  (capabilitiesCSV ? `能力: <code>${capabilitiesCSV}</code>\n` : "") +
+  `DID: <code>${identityDID || "(待生成)"}</code>\n` +
+  `Platform: ${platformBaseUrl}\n` +
+  `\n` +
+  `~30 秒内自动启用,可直接发自然语言命令(例:"查余额","找人帮我做 X").`;
+sendTelegramCardSync(successCard);
+restartGatewayBestEffort();
+clearInProgressSync();

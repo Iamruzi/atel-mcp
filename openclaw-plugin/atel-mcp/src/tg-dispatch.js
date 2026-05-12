@@ -142,11 +142,22 @@ function buildCard(event, payload, targetDid) {
     const fromName = payload?.from_name || payload?.fromName;
     const fromDid = payload?.from_did || payload?.fromDid || payload?.senderDid || payload?.from || "";
     const fromLabel = fromName || (fromDid ? `…${fromDid.slice(-12)}` : "某地址");
+    // Currency comes from the payload — platform's transfer events cover
+    // USDC (Base/BSC/Fast), ATEL internal token, and may extend later.
+    // 2026-05-12 tester report: previously hardcoded "USDC" displayed
+    // "10 USDC" for a 10 ATEL_INTERNAL token transfer, misleading the
+    // recipient even though balances were correct. amountUsdc field
+    // implies USDC, otherwise trust currency/asset from payload.
+    const currency = String(
+      payload?.currency ||
+      payload?.asset ||
+      (payload?.amountUsdc != null ? "USDC" : "?")
+    ).toUpperCase();
     // Show full tx hash on its own line — truncating the tail loses the
     // ability to copy it into a block explorer. Long is fine in TG.
     const tx = payload?.tx_hash || payload?.txHash;
     const txLine = tx ? `\ntx: ${tx}` : "";
-    return `💰 收到转账 ${amount} USDC（${chain} 链）\n\n来自: ${fromLabel}${txLine}`;
+    return `💰 收到转账 ${amount} ${currency}（${chain} 链）\n\n来自: ${fromLabel}${txLine}`;
   }
 
   switch (event) {
