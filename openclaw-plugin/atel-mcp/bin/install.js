@@ -834,7 +834,12 @@ if (fs.existsSync(skillSrcPath)) {
 
 // User TG chat id for listener-driven card dispatch (also persisted in
 // atel-state.json above).
-const tgChat = valueOf("--tg-chat") || process.env.ATEL_USER_TG_CHAT || "";
+// 2026-05-13: also accept --tg-chat-id (bootstrap.sh's canonical flag
+// since Plan 2). Earlier code only read --tg-chat which left
+// atel-state.json.tgChat empty on every bootstrap-driven install, falling
+// back to sessions.json-derived chat ids — fragile when the user switches
+// TG accounts. Both forms are accepted; --tg-chat-id wins if both passed.
+const tgChat = valueOf("--tg-chat-id") || valueOf("--tg-chat") || process.env.ATEL_USER_TG_CHAT || "";
 if (tgChat) {
   // Re-read state and merge tgChat (we wrote it above without tgChat
   // because we hadn't checked for the flag yet)
