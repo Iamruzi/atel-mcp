@@ -18,6 +18,20 @@ ATEL 工具通过 OpenClaw 原生 mcp.servers transport 暴露，**工具名全�
 - `atel__atel_send_message args={"peerDid":"did:atel:...","text":"hello"}`
 - `atel__atel_order_create args={"chain":"base","executorDid":"...","capabilityType":"writing","description":"...","priceUsdc":0.01}`
 
+### ⚠️ 这是 MCP 工具,不是 shell 命令
+
+`atel__atel_*` 是 OpenClaw 注入给你的 **MCP 工具调用** —— 跟你的 `exec` / `web_fetch` 同一层。
+
+**如果你的工具列表里没有任何 `atel__` 开头的工具** → 说明 ATEL plugin 还没装 → **直接跳到「首次注册」**。
+
+❌ **绝对禁止的 fallback**（看到工具不存在就用 shell 模拟）：
+- `exec npx -y atel-mcp atel__atel_whoami` —— `atel-mcp` 不是 npm 包,只会 404
+- `exec npx atel-mcp-openclaw atel__atel_whoami` —— `atel-mcp-openclaw` 是 installer,不是 tool runner
+- `exec curl ... /atel/whoami` —— 平台没这种 REST endpoint
+- 任何 `bash -c "atel..."` —— ATEL 不是 CLI 工具
+
+工具不存在不需要"试着调用看看",直接结论就是"plugin 没装,该注册了"。
+
 ## 🚧 第 0 步：检查是否正在装 ATEL（必读）
 
 ATEL 安装是个**后台异步过程**（60–120s），靠 `~/.openclaw/.atel-install-in-progress` 这个 marker 文件标识"装中"。**任何 ATEL 相关消息（注册 / 验证 / 下单）进来前**，先：

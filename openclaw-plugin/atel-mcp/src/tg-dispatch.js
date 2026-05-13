@@ -18,8 +18,28 @@ import fs from "node:fs";
 import path from "node:path";
 
 let cachedToken = null;
-let cachedChat = null;
 let cachedConfigPath = null;
+
+// 2026-05-13 fix: cachedChat used to be a string-or-null that was set ONCE
+// at process startup from sessions.json and never re-read. When a user
+// switched TG accounts (or merely paired a new bot), the listener kept
+// dispatching to the old chat forever — 哆啦弟 case: listener pid 961232
+// up 1d11h44m, cached old chat 5794244006 which the user had blocked,
+// so every card died with TG 403 Forbidden. Restarting fixed it, but
+// requiring a restart on every chat-binding change is fragile. Now the
+// cache has a 5-minute TTL so chat-id changes propagate automatically.
+let cachedChatEntry = null; // { value, ts } | null
+const CHAT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+// 2026-05-13 fix: track chats that hard-rejected our messages with TG 403
+// (user blocked the bot, group kicked the bot, chat deleted, etc.). These
+// are PERMANENT errors at the chat level — retrying just wastes API quota
+// and the operator's eyeballs reading repeating "send failed" log lines.
+// Persisted in-memory only; cleared on listener restart so a re-paired
+// user (block → unblock → re-DM) gets cards again after the cachedChat
+// TTL refresh picks them up.
+const blockedChats = new Set();
+
 const recentDispatches = new Map(); // dedupeKey -> ms
 
 function loadOpenClawConfig(configPath) {
@@ -41,46 +61,49 @@ function loadOpenClawConfig(configPath) {
   }
 }
 
-function readChatIdFromSideChannel(extensionDir) {
-  // Returns CSV string of chat_ids; dispatchEvent splits and sends to each.
-  // Multi-recipient ATEL_USER_TG_CHAT="111,222,333" lets you broadcast cards
-  // to user + observer (e.g. tester + their lead) without rerunning install.
-  if (cachedChat !== null) return cachedChat;
+function resolveChatIdRaw(extensionDir) {
+  // Returns CSV string of chat_ids. Read order, first match wins:
+  //   1. ATEL_USER_TG_CHAT env var (operator override / broadcast set)
+  //   2. atel-state.json .tgChat (install.js wrote this when --tg-chat was passed)
+  //   3. tg-chat.txt (legacy single-file)
+  //   4. sessions.json — collect ALL telegram:CHAT_ID matches so every
+  //      paired chat sees the cards (was: only first match)
   if (process.env.ATEL_USER_TG_CHAT) {
-    cachedChat = String(process.env.ATEL_USER_TG_CHAT);
-    return cachedChat;
+    return String(process.env.ATEL_USER_TG_CHAT);
   }
   try {
     const stateFile = path.join(extensionDir, "atel-state.json");
     if (fs.existsSync(stateFile)) {
       const st = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-      if (typeof st?.tgChat === "string" && st.tgChat) {
-        cachedChat = st.tgChat;
-        return cachedChat;
-      }
+      if (typeof st?.tgChat === "string" && st.tgChat) return st.tgChat;
     }
   } catch {}
   try {
     const p = path.join(extensionDir, "tg-chat.txt");
     if (fs.existsSync(p)) {
-      cachedChat = fs.readFileSync(p, "utf8").trim();
-      return cachedChat;
+      const v = fs.readFileSync(p, "utf8").trim();
+      if (v) return v;
     }
   } catch {}
-  // OpenClaw session fallback — collect ALL telegram:CHAT_ID matches so
-  // every paired chat sees the cards (was: only first match).
   try {
     const sessions = path.join(process.env.HOME || "/root", ".openclaw", "agents", "main", "sessions", "sessions.json");
     if (fs.existsSync(sessions)) {
       const txt = fs.readFileSync(sessions, "utf8");
       const all = [...new Set([...txt.matchAll(/telegram:(\d+)/g)].map(m => m[1]))];
-      if (all.length > 0) {
-        cachedChat = all.join(",");
-        return cachedChat;
-      }
+      if (all.length > 0) return all.join(",");
     }
   } catch {}
   return "";
+}
+
+function readChatIdFromSideChannel(extensionDir) {
+  const now = Date.now();
+  if (cachedChatEntry && now - cachedChatEntry.ts < CHAT_CACHE_TTL_MS) {
+    return cachedChatEntry.value;
+  }
+  const fresh = resolveChatIdRaw(extensionDir);
+  cachedChatEntry = { value: fresh, ts: now };
+  return fresh;
 }
 
 function shortOrderTag(orderId) {
@@ -359,17 +382,73 @@ function buildCard(event, payload, targetDid) {
   }
 }
 
+// Custom error class so dispatchEvent can tell permanent (drop chat)
+// from transient (worth retrying / waiting for next event).
+class TgSendError extends Error {
+  constructor(message, { status = 0, permanent = false } = {}) {
+    super(message);
+    this.status = status;
+    this.permanent = permanent;
+  }
+}
+
+// 2026-05-13 fix: retry transient failures. Pre-fix, life7days_bot lost a
+// milestone_verified card to a single `fetch failed` (likely TLS reset)
+// and the user never saw M1 progress — the platform doesn't replay
+// listener-delivered events, so a one-shot failure here means permanent
+// loss to the user. Now: 3 attempts with backoff 500ms / 2s / 8s.
+//
+// Failure modes mapped to actions:
+//   - fetch threw (network/DNS/TLS) → retry
+//   - TG 5xx / 429 (server overload, rate limit) → retry
+//   - TG 4xx other (400 bad request, 401 invalid token) → no retry, throw
+//   - TG 403 Forbidden ("bot blocked by user", "kicked from group") →
+//     permanent, throw with permanent=true so caller adds to blockedChats
 async function sendTg(token, chatId, text) {
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  });
-  if (!res.ok) {
+  const backoffs = [500, 2000, 8000]; // ms between attempts; last entry ignored after the final try
+
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+    } catch (e) {
+      // Transient — fetch itself failed (DNS / TLS / connection reset).
+      // Retry.
+      lastErr = new TgSendError(`fetch failed: ${e && e.message || e}`, { status: 0 });
+      if (attempt < 2) await sleep(backoffs[attempt]);
+      continue;
+    }
+    if (res.ok) return; // 2xx
     const body = await res.text().catch(() => "");
-    throw new Error(`tg ${res.status}: ${body.slice(0, 200)}`);
+    const snippet = body.slice(0, 200);
+    if (res.status === 403) {
+      // Permanent: bot blocked / kicked / chat deleted. No point retrying.
+      throw new TgSendError(`tg ${res.status}: ${snippet}`, { status: res.status, permanent: true });
+    }
+    if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+      // Other 4xx (400 bad request, 401 unauthorized, 404 chat not found).
+      // 404 (chat not found) is also a permanent-ish failure for *this*
+      // chat. Treat them all as permanent.
+      throw new TgSendError(`tg ${res.status}: ${snippet}`, {
+        status: res.status,
+        permanent: res.status === 400 || res.status === 401 || res.status === 404,
+      });
+    }
+    // 5xx or 429 → retry
+    lastErr = new TgSendError(`tg ${res.status}: ${snippet}`, { status: res.status });
+    if (attempt < 2) await sleep(backoffs[attempt]);
   }
+  throw lastErr || new TgSendError("tg send failed after 3 attempts", { status: 0 });
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export async function dispatchEvent(messageBody, opts) {
@@ -415,12 +494,30 @@ export async function dispatchEvent(messageBody, opts) {
     return;
   }
   const chatIds = String(chatIdRaw).split(",").map(s => s.trim()).filter(Boolean);
-  for (const chatId of chatIds) {
+  // 2026-05-13 fix: skip chats we've already marked as permanently
+  // dead (403 / 400 / 404). Don't spam TG API or log lines.
+  const liveChats = chatIds.filter((c) => !blockedChats.has(c));
+  const skipped = chatIds.length - liveChats.length;
+  if (skipped > 0 && liveChats.length === 0) {
+    // Every cached chat is dead — force a re-resolve next tick by
+    // invalidating the cache early. A re-paired user (block→unblock,
+    // or a new bot DM) will then get cards once they show up in
+    // sessions.json / atel-state.json.
+    cachedChatEntry = null;
+    console.warn(`[atel-mcp/tg-dispatch] all ${chatIds.length} chat(s) are blocked; invalidating chat cache and skipping ${eventType}`);
+    return;
+  }
+  for (const chatId of liveChats) {
     try {
       await sendTg(token, chatId, card);
       console.log(`[atel-mcp/tg-dispatch] sent event=${eventType} order=${payload?.orderId || "?"} chat=${chatId} chars=${card.length}`);
     } catch (e) {
-      console.warn(`[atel-mcp/tg-dispatch] send failed event=${eventType} chat=${chatId}: ${e && e.message}`);
+      if (e && e.permanent) {
+        blockedChats.add(chatId);
+        console.warn(`[atel-mcp/tg-dispatch] PERMANENTLY skipping chat=${chatId} after ${e.message}; will not retry until listener restart or chat re-pair`);
+      } else {
+        console.warn(`[atel-mcp/tg-dispatch] send failed event=${eventType} chat=${chatId}: ${e && e.message} (event dropped after 3 retries)`);
+      }
     }
   }
 }
