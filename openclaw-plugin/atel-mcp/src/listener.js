@@ -146,6 +146,10 @@ function weAreExecutor(orderId, ourDid) {
   const cache = readOrderRoleCache();
   return cache[orderId]?.executorDid === ourDid;
 }
+function weAreRequester(orderId, ourDid) {
+  const cache = readOrderRoleCache();
+  return cache[orderId]?.requesterDid === ourDid;
+}
 
 function pruneHookDedup() {
   const now = Date.now();
@@ -192,7 +196,7 @@ function runHookAttempt(job, attempt) {
 function buildPromptMilestoneVerified(orderId, milestoneIndex, currentMilestone, allComplete) {
   if (allComplete) return null;
   return [
-    `[ATEL hook · executor · 0.6.35]`,
+    `[ATEL hook · executor · 0.6.38]`,
     `Order ${orderId}: milestone M${milestoneIndex} just verified.`,
     `You are the executor. Submit milestone M${currentMilestone} NOW.`,
     ``,
@@ -203,6 +207,25 @@ function buildPromptMilestoneVerified(orderId, milestoneIndex, currentMilestone,
     `4. atel__atel_milestone_submit args={"orderId":"${orderId}","index":${currentMilestone},"content":"<your deliverable text>"}`,
     ``,
     `Do ONLY the above. Do not sweep other orders, do not list other agents, do not query balance. Reply NO_REPLY when done.`,
+  ].join("\n");
+}
+
+function buildPromptMilestoneSubmitted(orderId, milestoneIndex) {
+  return [
+    `[ATEL hook · requester · 0.6.38]`,
+    `Order ${orderId}: executor just submitted milestone M${milestoneIndex}.`,
+    `You are the requester. Verify it (pass or reject) NOW.`,
+    ``,
+    `Steps:`,
+    `1. atel__atel_order_get args={"orderId":"${orderId}"} — read the order description.`,
+    `2. atel__atel_milestone_list args={"orderId":"${orderId}"} — find milestone[${milestoneIndex}], read its title + result_summary (the executor's submission).`,
+    `3. Judge whether the submission satisfies M${milestoneIndex}'s goal in the context of the order description:`,
+    `   - PASS if result_summary length ≥ 10 chars AND the content clearly relates to the order description / milestone title (the platform's verifier rule).`,
+    `   - REJECT if result_summary is empty, placeholder text ("TBD", "I will..."), or wholly unrelated.`,
+    `4a. If PASS: atel__atel_milestone_verify args={"orderId":"${orderId}","index":${milestoneIndex}}`,
+    `4b. If REJECT: atel__atel_milestone_reject args={"orderId":"${orderId}","index":${milestoneIndex},"content":"<short specific reason — point at what is missing>"}`,
+    ``,
+    `Do ONLY the above. Do not sweep other orders, do not query balance. Reply NO_REPLY when done.`,
   ].join("\n");
 }
 
@@ -258,6 +281,52 @@ export function enqueueMilestoneVerifiedHook({ messageBody, identityPath }) {
     }
     hookQueue.push({ eventType: "milestone_verified", orderId, prompt });
     console.log(`[atel-mcp/listener-hook] enqueued event=milestone_verified order=${orderId} mi=${milestoneIndex} → submit M${currentMilestone} (queue depth=${hookQueue.length}, busy=${hookWorkerBusy})`);
+    processHookQueue();
+  } catch (e) {
+    console.warn(`[atel-mcp/listener-hook] enqueue error: ${e && e.message}`);
+  }
+}
+
+// 0.6.38: requester-side hook. When executor submits a milestone, we
+// (the requester) need to verify or reject it. Same queue/dedup/spawn
+// machinery as enqueueMilestoneVerifiedHook; only the event type, role
+// check, and prompt differ.
+export function enqueueMilestoneSubmittedHook({ messageBody, identityPath }) {
+  if (!HOOK_MODE_ENABLED) return;
+  try {
+    const ourDid = loadOurDid(identityPath);
+    if (!ourDid) return;
+    const evt = unwrapEvent(messageBody);
+    const eventType = String(evt?.event || evt?.eventType || "").replace(/\./g, "_");
+    if (eventType !== "milestone_submitted") return;
+    const payload = evt?.payload || evt || {};
+    const orderId = payload.orderId || payload.order_id;
+    const milestoneIndex = payload.milestoneIndex ?? payload.milestone_index;
+    if (!orderId || milestoneIndex == null) {
+      console.log(`[atel-mcp/listener-hook] milestone_submitted missing fields (orderId=${orderId} mi=${milestoneIndex}) — skip`);
+      return;
+    }
+
+    if (!weAreRequester(orderId, ourDid)) {
+      // We're the executor (or role unknown). Don't fire — executor
+      // doesn't need to verify their own submission. Cron path on
+      // requester's side will still handle even if their plugin
+      // doesn't have hooks yet.
+      console.log(`[atel-mcp/listener-hook] M${milestoneIndex} submitted for ${orderId} — not us requester (or unknown role), skip hook`);
+      return;
+    }
+
+    const dedupeKey = `milestone_submitted:${orderId}:${milestoneIndex}`;
+    pruneHookDedup();
+    if (hookDedup.has(dedupeKey)) {
+      console.log(`[atel-mcp/listener-hook] dedup hit ${dedupeKey} — skip`);
+      return;
+    }
+    hookDedup.set(dedupeKey, Date.now());
+
+    const prompt = buildPromptMilestoneSubmitted(orderId, milestoneIndex);
+    hookQueue.push({ eventType: "milestone_submitted", orderId, prompt });
+    console.log(`[atel-mcp/listener-hook] enqueued event=milestone_submitted order=${orderId} mi=${milestoneIndex} → verify/reject (queue depth=${hookQueue.length}, busy=${hookWorkerBusy})`);
     processHookQueue();
   } catch (e) {
     console.warn(`[atel-mcp/listener-hook] enqueue error: ${e && e.message}`);
@@ -514,6 +583,7 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
         // path which is still the safety net.
         maybeCacheOrderRole(messageBody, identityPath);
         enqueueMilestoneVerifiedHook({ messageBody, identityPath });
+        enqueueMilestoneSubmittedHook({ messageBody, identityPath });
         res.statusCode = 200;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ ok: true, queued: true }));

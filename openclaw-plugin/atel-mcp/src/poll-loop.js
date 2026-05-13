@@ -22,7 +22,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import { pushEvent } from "./inbox.js";
 import { dispatchEvent } from "./tg-dispatch.js";
-import { wakeCronNow, maybeCacheOrderRole, enqueueMilestoneVerifiedHook } from "./listener.js";
+import { wakeCronNow, maybeCacheOrderRole, enqueueMilestoneVerifiedHook, enqueueMilestoneSubmittedHook } from "./listener.js";
 
 let timer = null;
 let nacl = null;
@@ -103,6 +103,7 @@ async function pollOnce(platformBaseUrl, identityPath) {
       // (pull-mode default for any agent without a registered https URL).
       try { maybeCacheOrderRole(dispatchInput, identityPath); } catch (e) { console.warn(`[atel-mcp/poll-loop] role cache error: ${e && e.message}`); }
       try { enqueueMilestoneVerifiedHook({ messageBody: dispatchInput, identityPath }); } catch (e) { console.warn(`[atel-mcp/poll-loop] hook enqueue error: ${e && e.message}`); }
+      try { enqueueMilestoneSubmittedHook({ messageBody: dispatchInput, identityPath }); } catch (e) { console.warn(`[atel-mcp/poll-loop] submitted hook error: ${e && e.message}`); }
 
       // Hardcoded auto-actions for the trivial state-mutation steps.
       // These don't need LLM judgment (they're "yes" 100% of the time
