@@ -96,28 +96,51 @@ function saveOrderRoleCache(cache) {
     console.warn(`[atel-mcp/listener-hook] order role cache save failed: ${e && e.message}`);
   }
 }
-function maybeCacheOrderRole(messageBody) {
-  const payload = messageBody?.payload || messageBody?.body?.payload || messageBody || {};
+// Inspect a relay event and cache (orderId → {executorDid, requesterDid}).
+// Platform's notifyAgent is one-sided: it sends order_created to the
+// executor with payload.requesterDid only (no executorDid — recipient
+// IS the executor, that's implicit). Likewise order_accepted goes to
+// the requester with payload.executorDid only. To infer the missing
+// side we use the receiving identity (ourDid via identityPath) plus
+// the event type.
+export function maybeCacheOrderRole(messageBody, identityPath) {
+  const evt = (messageBody?.body && typeof messageBody.body === "object" && messageBody.body.event) ? messageBody.body : messageBody;
+  const eventType = String(evt?.event || evt?.eventType || "").replace(/\./g, "_");
+  const payload = evt?.payload || evt || {};
   const orderId = payload.orderId || payload.order_id;
-  const executorDid = payload.executorDid || payload.executor_did;
-  const requesterDid = payload.requesterDid || payload.requester_did;
-  if (!orderId || !executorDid) return;
+  if (!orderId) return;
+  let executorDid = payload.executorDid || payload.executor_did || null;
+  let requesterDid = payload.requesterDid || payload.requester_did || null;
+  // Infer the missing side from "we are the recipient" + event semantics
+  const ourDid = loadOurDid(identityPath);
+  if (ourDid) {
+    if (eventType === "order_created" && !executorDid) {
+      // platform pushed order_created → executor (us)
+      executorDid = ourDid;
+    } else if (eventType === "order_accepted" && !requesterDid) {
+      // platform pushed order_accepted → requester (us)
+      requesterDid = ourDid;
+    }
+  }
+  if (!executorDid && !requesterDid) return; // can't determine anything from this event
   const cache = readOrderRoleCache();
   const existing = cache[orderId] || {};
-  if (existing.executorDid === executorDid && (existing.requesterDid || null) === (requesterDid || existing.requesterDid || null)) {
-    return; // no change
-  }
-  cache[orderId] = {
-    executorDid,
+  const merged = {
+    executorDid: executorDid || existing.executorDid || null,
     requesterDid: requesterDid || existing.requesterDid || null,
     cachedAt: Date.now(),
   };
+  if (existing.executorDid === merged.executorDid && existing.requesterDid === merged.requesterDid) {
+    return; // already cached, skip write
+  }
+  cache[orderId] = merged;
   // Prune entries older than 7 days
   const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
   for (const k of Object.keys(cache)) {
     if ((cache[k].cachedAt || 0) < cutoff) delete cache[k];
   }
   saveOrderRoleCache(cache);
+  console.log(`[atel-mcp/listener-hook] role cache ${orderId} executor=${merged.executorDid?.slice(-12) || "?"} requester=${merged.requesterDid?.slice(-12) || "?"}`);
 }
 function weAreExecutor(orderId, ourDid) {
   const cache = readOrderRoleCache();
@@ -183,19 +206,34 @@ function buildPromptMilestoneVerified(orderId, milestoneIndex, currentMilestone,
   ].join("\n");
 }
 
-function enqueueMilestoneVerifiedHook({ messageBody, identityPath }) {
+// Accept either the unwrapped event shape ({event, payload, ...}) or
+// the platform's HTTP wrapper ({body: {event, payload, ...}}). Both
+// the push path (listener.js HTTP POST) and the pull path
+// (poll-loop.js) call this helper.
+function unwrapEvent(messageBody) {
+  if (messageBody?.body && typeof messageBody.body === "object" && messageBody.body.event) {
+    return messageBody.body;
+  }
+  return messageBody;
+}
+
+export function enqueueMilestoneVerifiedHook({ messageBody, identityPath }) {
   if (!HOOK_MODE_ENABLED) return;
   try {
     const ourDid = loadOurDid(identityPath);
     if (!ourDid) return;
-    const eventType = String(messageBody?.event || messageBody?.eventType || "").replace(/\./g, "_");
+    const evt = unwrapEvent(messageBody);
+    const eventType = String(evt?.event || evt?.eventType || "").replace(/\./g, "_");
     if (eventType !== "milestone_verified") return;
-    const payload = messageBody?.payload || messageBody?.body?.payload || {};
+    const payload = evt?.payload || evt || {};
     const orderId = payload.orderId || payload.order_id;
     const milestoneIndex = payload.milestoneIndex ?? payload.milestone_index;
     const currentMilestone = payload.currentMilestone ?? payload.current_milestone;
     const allComplete = payload.allComplete ?? payload.all_complete ?? false;
-    if (!orderId || milestoneIndex == null || currentMilestone == null) return;
+    if (!orderId || milestoneIndex == null || currentMilestone == null) {
+      console.log(`[atel-mcp/listener-hook] milestone_verified missing fields (orderId=${orderId} mi=${milestoneIndex} cm=${currentMilestone}) — skip`);
+      return;
+    }
 
     if (!weAreExecutor(orderId, ourDid)) {
       // Role unknown (cache miss — order pre-dates this listener) OR
@@ -474,7 +512,7 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
         // then enqueue a focused-prompt LLM spawn for milestone_verified
         // events (executor side only). Runs in parallel to the cron-tick
         // path which is still the safety net.
-        maybeCacheOrderRole(messageBody);
+        maybeCacheOrderRole(messageBody, identityPath);
         enqueueMilestoneVerifiedHook({ messageBody, identityPath });
         res.statusCode = 200;
         res.setHeader("content-type", "application/json");

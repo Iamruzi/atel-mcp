@@ -22,7 +22,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import { pushEvent } from "./inbox.js";
 import { dispatchEvent } from "./tg-dispatch.js";
-import { wakeCronNow } from "./listener.js";
+import { wakeCronNow, maybeCacheOrderRole, enqueueMilestoneVerifiedHook } from "./listener.js";
 
 let timer = null;
 let nacl = null;
@@ -96,6 +96,13 @@ async function pollOnce(platformBaseUrl, identityPath) {
         ? m.message.body
         : m.message;
       await dispatchEvent(dispatchInput, { targetDid: identity.did });
+      // 0.6.36: cache order roles + enqueue LLM hook for milestone_verified
+      // (executor side) on PULL events too. The push path in listener.js
+      // already does this; pull path needs the same hookup because most
+      // events arrive via pull when the agent endpoint is mcp://remote/...
+      // (pull-mode default for any agent without a registered https URL).
+      try { maybeCacheOrderRole(dispatchInput, identityPath); } catch (e) { console.warn(`[atel-mcp/poll-loop] role cache error: ${e && e.message}`); }
+      try { enqueueMilestoneVerifiedHook({ messageBody: dispatchInput, identityPath }); } catch (e) { console.warn(`[atel-mcp/poll-loop] hook enqueue error: ${e && e.message}`); }
 
       // Hardcoded auto-actions for the trivial state-mutation steps.
       // These don't need LLM judgment (they're "yes" 100% of the time
