@@ -16,13 +16,215 @@ import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { pushEvent } from "./inbox.js";
 import { dispatchEvent } from "./tg-dispatch.js";
 import { autoActOnPushEvent } from "./poll-loop.js";
 import { dashboardAuth } from "./tool.js";
 
 const _here = path.dirname(fileURLToPath(import.meta.url));
+
+// ─── 0.6.35: SDK-style event-triggered LLM hook queue ─────────────────
+//
+// Mirrors atel-sdk/bin/atel.mjs hookQueue pattern (line ~6180+). The
+// 30s OpenClaw cron tick is the dominant tail-latency contributor for
+// A2A milestone chains (measured 11.8 min for 5-milestone order, vs
+// SDK's seconds-scale per step). Listener now spawns `openclaw agent
+// --agent main --local -m "<focused prompt>"` immediately on the
+// events we know how to react to, bypassing cron wait + giving the LLM
+// a single-purpose prompt (vs the generic system-prompt sweep).
+//
+// Step 1 scope (this version):
+//   - milestone_verified event, executor side ONLY → submit next milestone
+//   - serial queue (one openclaw agent at a time — avoids session lock thrash)
+//   - in-memory dedup with 10min TTL
+//   - session-lock retry 5× with 3-13s backoff (same as SDK)
+//   - 240s per-attempt timeout (same as SDK milestone hooks)
+//   - cron tick still runs as before (safety net for missed hooks)
+//   - opt-out via ATEL_HOOK_MODE=0
+//
+// Out of scope (added in later versions):
+//   - milestone_submitted (requester verify), milestone_rejected,
+//     milestone_plan_confirmed, order_accepted hooks
+//   - auto-accept / auto-approve-plan moved into hook path
+//   - cron interval relaxation
+const HOOK_MODE_ENABLED = process.env.ATEL_HOOK_MODE !== "0";
+const HOOK_DEDUP_TTL_MS = 10 * 60 * 1000;
+const HOOK_TIMEOUT_MS = 240_000;
+const HOOK_LOCK_RETRY_MAX = 5;
+const HOOK_LOCK_RETRY_BASE_MS = 3000;
+const HOOK_LOCK_RETRY_STEP_MS = 2000;
+
+const hookQueue = [];
+let hookWorkerBusy = false;
+const hookDedup = new Map(); // dedupeKey -> ms
+
+let cachedOurDid = null;
+function loadOurDid(identityPath) {
+  if (cachedOurDid) return cachedOurDid;
+  if (!identityPath) return null;
+  try {
+    const id = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+    if (typeof id?.did === "string") cachedOurDid = id.did;
+  } catch {}
+  return cachedOurDid;
+}
+
+// Role cache: orderId → { executorDid, requesterDid }. Populated when
+// any event payload carries both DIDs (order_created, order_accepted,
+// escrow_confirmed, etc.). Persisted to disk so a listener restart
+// mid-order doesn't lose the role mapping.
+function orderRoleCacheFile() {
+  const home = process.env.HOME || "/root";
+  return path.join(home, ".openclaw", "atel-mcp-order-roles.json");
+}
+function readOrderRoleCache() {
+  try {
+    const p = orderRoleCacheFile();
+    if (!fs.existsSync(p)) return {};
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch { return {}; }
+}
+function saveOrderRoleCache(cache) {
+  try {
+    const p = orderRoleCacheFile();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const tmp = p + ".tmp-" + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(cache));
+    fs.renameSync(tmp, p);
+  } catch (e) {
+    console.warn(`[atel-mcp/listener-hook] order role cache save failed: ${e && e.message}`);
+  }
+}
+function maybeCacheOrderRole(messageBody) {
+  const payload = messageBody?.payload || messageBody?.body?.payload || messageBody || {};
+  const orderId = payload.orderId || payload.order_id;
+  const executorDid = payload.executorDid || payload.executor_did;
+  const requesterDid = payload.requesterDid || payload.requester_did;
+  if (!orderId || !executorDid) return;
+  const cache = readOrderRoleCache();
+  const existing = cache[orderId] || {};
+  if (existing.executorDid === executorDid && (existing.requesterDid || null) === (requesterDid || existing.requesterDid || null)) {
+    return; // no change
+  }
+  cache[orderId] = {
+    executorDid,
+    requesterDid: requesterDid || existing.requesterDid || null,
+    cachedAt: Date.now(),
+  };
+  // Prune entries older than 7 days
+  const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+  for (const k of Object.keys(cache)) {
+    if ((cache[k].cachedAt || 0) < cutoff) delete cache[k];
+  }
+  saveOrderRoleCache(cache);
+}
+function weAreExecutor(orderId, ourDid) {
+  const cache = readOrderRoleCache();
+  return cache[orderId]?.executorDid === ourDid;
+}
+
+function pruneHookDedup() {
+  const now = Date.now();
+  for (const [k, ts] of hookDedup) {
+    if (now - ts > HOOK_DEDUP_TTL_MS) hookDedup.delete(k);
+  }
+}
+
+function processHookQueue() {
+  if (hookWorkerBusy) return;
+  if (hookQueue.length === 0) return;
+  hookWorkerBusy = true;
+  const job = hookQueue.shift();
+  runHookAttempt(job, 0);
+}
+
+function runHookAttempt(job, attempt) {
+  const t0 = Date.now();
+  execFile(
+    "openclaw",
+    ["agent", "--agent", "main", "--local", "-m", job.prompt],
+    { timeout: HOOK_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
+    (err, stdout, stderr) => {
+      const dur = Date.now() - t0;
+      const combined = ((err && err.message) || "") + " " + (stderr || "");
+      const isLockError = /session.*lock|file lock|already running|EBUSY|locked/i.test(combined);
+      if (err && isLockError && attempt < HOOK_LOCK_RETRY_MAX) {
+        const delay = HOOK_LOCK_RETRY_BASE_MS + attempt * HOOK_LOCK_RETRY_STEP_MS;
+        console.warn(`[atel-mcp/listener-hook] session locked event=${job.eventType} order=${job.orderId} attempt=${attempt + 1}/${HOOK_LOCK_RETRY_MAX} retry-in=${delay}ms`);
+        setTimeout(() => runHookAttempt(job, attempt + 1), delay);
+        return;
+      }
+      if (err) {
+        console.warn(`[atel-mcp/listener-hook] FAILED event=${job.eventType} order=${job.orderId} dur=${dur}ms code=${err.code || ""} err="${(err.message || "").slice(0, 200)}" stderr="${(stderr || "").slice(0, 200)}"`);
+      } else {
+        console.log(`[atel-mcp/listener-hook] OK event=${job.eventType} order=${job.orderId} dur=${dur}ms`);
+      }
+      hookWorkerBusy = false;
+      setImmediate(processHookQueue);
+    }
+  );
+}
+
+function buildPromptMilestoneVerified(orderId, milestoneIndex, currentMilestone, allComplete) {
+  if (allComplete) return null;
+  return [
+    `[ATEL hook · executor · 0.6.35]`,
+    `Order ${orderId}: milestone M${milestoneIndex} just verified.`,
+    `You are the executor. Submit milestone M${currentMilestone} NOW.`,
+    ``,
+    `Steps:`,
+    `1. atel__atel_order_get args={"orderId":"${orderId}"} — read description.`,
+    `2. atel__atel_milestone_list args={"orderId":"${orderId}"} — read milestone[${currentMilestone}]'s title and any plan notes.`,
+    `3. WRITE substantive deliverable content for M${currentMilestone} (real content matching the title + the order description). Match the language the order asks for. Not placeholder, not "TBD".`,
+    `4. atel__atel_milestone_submit args={"orderId":"${orderId}","index":${currentMilestone},"content":"<your deliverable text>"}`,
+    ``,
+    `Do ONLY the above. Do not sweep other orders, do not list other agents, do not query balance. Reply NO_REPLY when done.`,
+  ].join("\n");
+}
+
+function enqueueMilestoneVerifiedHook({ messageBody, identityPath }) {
+  if (!HOOK_MODE_ENABLED) return;
+  try {
+    const ourDid = loadOurDid(identityPath);
+    if (!ourDid) return;
+    const eventType = String(messageBody?.event || messageBody?.eventType || "").replace(/\./g, "_");
+    if (eventType !== "milestone_verified") return;
+    const payload = messageBody?.payload || messageBody?.body?.payload || {};
+    const orderId = payload.orderId || payload.order_id;
+    const milestoneIndex = payload.milestoneIndex ?? payload.milestone_index;
+    const currentMilestone = payload.currentMilestone ?? payload.current_milestone;
+    const allComplete = payload.allComplete ?? payload.all_complete ?? false;
+    if (!orderId || milestoneIndex == null || currentMilestone == null) return;
+
+    if (!weAreExecutor(orderId, ourDid)) {
+      // Role unknown (cache miss — order pre-dates this listener) OR
+      // we're the requester. Either way, skip the hook. Cron-tick path
+      // will pick up the event from inbox on its next sweep.
+      console.log(`[atel-mcp/listener-hook] M${milestoneIndex} verified for ${orderId} — not us executor (or unknown role), skip hook; cron will handle`);
+      return;
+    }
+
+    const dedupeKey = `milestone_verified:${orderId}:${milestoneIndex}`;
+    pruneHookDedup();
+    if (hookDedup.has(dedupeKey)) {
+      console.log(`[atel-mcp/listener-hook] dedup hit ${dedupeKey} — skip`);
+      return;
+    }
+    hookDedup.set(dedupeKey, Date.now());
+
+    const prompt = buildPromptMilestoneVerified(orderId, milestoneIndex, currentMilestone, allComplete);
+    if (!prompt) {
+      console.log(`[atel-mcp/listener-hook] M${milestoneIndex} verified for ${orderId} is allComplete — no hook needed (platform auto-settles)`);
+      return;
+    }
+    hookQueue.push({ eventType: "milestone_verified", orderId, prompt });
+    console.log(`[atel-mcp/listener-hook] enqueued event=milestone_verified order=${orderId} mi=${milestoneIndex} → submit M${currentMilestone} (queue depth=${hookQueue.length}, busy=${hookWorkerBusy})`);
+    processHookQueue();
+  } catch (e) {
+    console.warn(`[atel-mcp/listener-hook] enqueue error: ${e && e.message}`);
+  }
+}
 
 // Coalesce burst push notifications into one cron wake within a 1s
 // window. Avoids spawning openclaw cron run for every event when the
@@ -268,6 +470,12 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
         // atel-mcp-poll job so the agent processes this event NOW,
         // instead of waiting up to 30s for the next scheduled tick.
         wakeCronNow();
+        // 0.6.35 hook path: cache role mappings on order_* events,
+        // then enqueue a focused-prompt LLM spawn for milestone_verified
+        // events (executor side only). Runs in parallel to the cron-tick
+        // path which is still the safety net.
+        maybeCacheOrderRole(messageBody);
+        enqueueMilestoneVerifiedHook({ messageBody, identityPath });
         res.statusCode = 200;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ ok: true, queued: true }));
