@@ -17,6 +17,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { spawn, execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { pushEvent } from "./inbox.js";
 import { dispatchEvent } from "./tg-dispatch.js";
 import { autoActOnPushEvent } from "./poll-loop.js";
@@ -168,9 +169,19 @@ function processHookQueue() {
 
 function runHookAttempt(job, attempt) {
   const t0 = Date.now();
+  // 0.6.39: each hook invocation gets a fresh --session-id. Without this,
+  // every hook fans into the agent's default lane (agent:main:main), which
+  // accumulates assistant messages with tool_calls indefinitely. Once the
+  // operator switches LLM provider to a thinking-model family that demands
+  // reasoning_content roundtripping (every Xiaomi MiMo cluster does this),
+  // the lane's prior tool_call assistant rows fail validation and the agent
+  // bricks until someone manually archives the lane file. Each hook prompt
+  // is fully self-contained (orderId, milestone index, role, full
+  // instructions) so a fresh session loses no information.
+  const sessionId = job.sessionId || randomUUID();
   execFile(
     "openclaw",
-    ["agent", "--agent", "main", "--local", "-m", job.prompt],
+    ["agent", "--agent", "main", "--session-id", sessionId, "--local", "-m", job.prompt],
     { timeout: HOOK_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
     (err, stdout, stderr) => {
       const dur = Date.now() - t0;
@@ -327,6 +338,112 @@ export function enqueueMilestoneSubmittedHook({ messageBody, identityPath }) {
     const prompt = buildPromptMilestoneSubmitted(orderId, milestoneIndex);
     hookQueue.push({ eventType: "milestone_submitted", orderId, prompt });
     console.log(`[atel-mcp/listener-hook] enqueued event=milestone_submitted order=${orderId} mi=${milestoneIndex} → verify/reject (queue depth=${hookQueue.length}, busy=${hookWorkerBusy})`);
+    processHookQueue();
+  } catch (e) {
+    console.warn(`[atel-mcp/listener-hook] enqueue error: ${e && e.message}`);
+  }
+}
+
+// 0.6.39: executor-side hook for milestone_rejected.
+//
+// Product spec is "executor auto-resubmits on reject; after 3 rejects the
+// platform fires automatic arbitration." Platform side is fully
+// implemented: it tracks submit_count, runs runMilestoneArbitration()
+// inline when submit_count >= 3, and ships milestone_rejected events with
+// a ready-to-use Chinese `prompt` field telling the executor agent
+// exactly what to fix. What was missing was the plugin: it would
+// tg-dispatch the reject card to the user but never feed the prompt
+// back into the LLM, so the executor sat forever in rejected state and
+// the 3-rejects-then-arbitrate path was unreachable in practice.
+//
+// We trust platform's prompt verbatim — it knows the rejected milestone's
+// title, the order description, the reject reason, the submit_count, and
+// the milestone_evidence_guidance. Re-deriving any of that here would
+// duplicate logic that already lives next to the source of truth.
+function buildPromptMilestoneRejected(orderId, milestoneIndex, payload) {
+  const platformPrompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
+  if (platformPrompt) {
+    // Platform shipped a fully-formed Chinese prompt. Append a short
+    // English do-only-this guard so the agent doesn't sweep other orders.
+    return [
+      platformPrompt,
+      ``,
+      `[ATEL hook · executor · 0.6.39]`,
+      `Do ONLY the resubmission for this order/milestone. Do not sweep other orders, do not list agents, do not query balance. Reply NO_REPLY when done.`,
+    ].join("\n");
+  }
+  // Fallback if platform omits prompt for any reason. Mirrors the contract
+  // of buildPromptMilestoneVerified so the LLM still has enough to act.
+  const submitCount = payload?.submitCount ?? payload?.submit_count ?? "?";
+  const maxAttempts = payload?.maxAttempts ?? payload?.max_attempts ?? 3;
+  const reason = payload?.rejectReason || payload?.reject_reason || "(no reason given)";
+  return [
+    `[ATEL hook · executor · 0.6.39]`,
+    `Order ${orderId}: milestone M${milestoneIndex} was rejected (attempt ${submitCount}/${maxAttempts}).`,
+    `Reject reason: ${reason}`,
+    `You are the executor. Resubmit M${milestoneIndex} NOW with content that addresses the reject reason.`,
+    ``,
+    `Steps:`,
+    `1. atel__atel_order_get args={"orderId":"${orderId}"} — re-read description.`,
+    `2. atel__atel_milestone_list args={"orderId":"${orderId}"} — read milestone[${milestoneIndex}]'s title and prior result_summary.`,
+    `3. WRITE substantive deliverable content for M${milestoneIndex} that fixes what the reject reason called out. Do not just retry the same content.`,
+    `4. atel__atel_milestone_submit args={"orderId":"${orderId}","index":${milestoneIndex},"content":"<your improved deliverable>"}`,
+    ``,
+    `If platform returns 409 "maximum 3 submissions reached", stop — platform fires arbitration automatically.`,
+    `Do ONLY the above. Do not sweep other orders, do not query balance. Reply NO_REPLY when done.`,
+  ].join("\n");
+}
+
+export function enqueueMilestoneRejectedHook({ messageBody, identityPath }) {
+  if (!HOOK_MODE_ENABLED) return;
+  try {
+    const ourDid = loadOurDid(identityPath);
+    if (!ourDid) return;
+    const evt = unwrapEvent(messageBody);
+    const eventType = String(evt?.event || evt?.eventType || "").replace(/\./g, "_");
+    if (eventType !== "milestone_rejected") return;
+    const payload = evt?.payload || evt || {};
+    const orderId = payload.orderId || payload.order_id;
+    const milestoneIndex = payload.milestoneIndex ?? payload.milestone_index;
+    if (!orderId || milestoneIndex == null) {
+      console.log(`[atel-mcp/listener-hook] milestone_rejected missing fields (orderId=${orderId} mi=${milestoneIndex}) — skip`);
+      return;
+    }
+
+    if (!weAreExecutor(orderId, ourDid)) {
+      // Only the executor needs to act on a reject. Requester already saw
+      // their own reject card via tg-dispatch.
+      console.log(`[atel-mcp/listener-hook] M${milestoneIndex} rejected for ${orderId} — not us executor (or unknown role), skip hook`);
+      return;
+    }
+
+    // If platform already escalated to arbitration on this reject (i.e.
+    // submit_count was already 3 before this reject and platform sent
+    // the synchronous arbitration response instead of looping back to us),
+    // the maxReached / arbitrationRequired flags will be set. Don't
+    // resubmit — platform owns the next state transition.
+    const maxReached = payload?.maxReached === true || payload?.max_reached === true;
+    const arbitrationRequired = payload?.arbitrationRequired === true || payload?.arbitration_required === true;
+    if (maxReached || arbitrationRequired) {
+      console.log(`[atel-mcp/listener-hook] M${milestoneIndex} rejected for ${orderId} reached max attempts (arbitration in progress) — skip hook`);
+      return;
+    }
+
+    // Dedupe by submit_count so each reject (1st, 2nd, 3rd) gets its own
+    // hook fire — versus dedup-by-(order,milestone) which would only
+    // honour the first reject and leave attempts 2+ stranded.
+    const submitCount = payload?.submitCount ?? payload?.submit_count ?? 0;
+    const dedupeKey = `milestone_rejected:${orderId}:${milestoneIndex}:${submitCount}`;
+    pruneHookDedup();
+    if (hookDedup.has(dedupeKey)) {
+      console.log(`[atel-mcp/listener-hook] dedup hit ${dedupeKey} — skip`);
+      return;
+    }
+    hookDedup.set(dedupeKey, Date.now());
+
+    const prompt = buildPromptMilestoneRejected(orderId, milestoneIndex, payload);
+    hookQueue.push({ eventType: "milestone_rejected", orderId, prompt });
+    console.log(`[atel-mcp/listener-hook] enqueued event=milestone_rejected order=${orderId} mi=${milestoneIndex} attempt=${submitCount}/3 → resubmit (queue depth=${hookQueue.length}, busy=${hookWorkerBusy})`);
     processHookQueue();
   } catch (e) {
     console.warn(`[atel-mcp/listener-hook] enqueue error: ${e && e.message}`);
@@ -584,6 +701,7 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
         maybeCacheOrderRole(messageBody, identityPath);
         enqueueMilestoneVerifiedHook({ messageBody, identityPath });
         enqueueMilestoneSubmittedHook({ messageBody, identityPath });
+        enqueueMilestoneRejectedHook({ messageBody, identityPath });
         res.statusCode = 200;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ ok: true, queued: true }));
