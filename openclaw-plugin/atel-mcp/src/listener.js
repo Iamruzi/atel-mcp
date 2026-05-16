@@ -344,6 +344,82 @@ export function enqueueMilestoneSubmittedHook({ messageBody, identityPath }) {
   }
 }
 
+// 0.6.40: executor-side hook for milestone_plan_confirmed.
+//
+// This is the trigger that gets the milestone loop started. Pre-0.6.40,
+// after the requester (or auto-approve) confirmed the plan, nothing in
+// the listener kicked the executor to submit M0 — it relied entirely on
+// the cron-driven sweep agent (atel-mcp-poll job) noticing the order
+// in `executing` status with M0 in `pending` state and submitting on its
+// own initiative. That coupling has two failure modes:
+//   (1) the cron job runs in OpenClaw's main agent lane and so inherits
+//       any reasoning_content pollution that bricks the lane after an
+//       LLM provider switch (the 5-consecutive-error-→-1h-backoff trap
+//       observed during ord-d78a9bed-0ea, 2026-05-16);
+//   (2) the cron tick interval is 30s, so even when healthy the time
+//       from plan_confirmed to M0 submit was 0–30s of dead air.
+// With this hook, the listener fires a focused-prompt LLM spawn the
+// instant plan_confirmed lands, in a fresh per-spawn session (0.6.39
+// session isolation), and the milestone pipeline is fully event-driven
+// from accept all the way through settle. cron remains as a redundant
+// safety net but is no longer load-bearing.
+function buildPromptMilestonePlanConfirmed(orderId) {
+  return [
+    `[ATEL hook · executor · 0.6.40]`,
+    `Order ${orderId}: milestone plan just confirmed. You are the executor. Submit milestone M0 NOW.`,
+    ``,
+    `Steps:`,
+    `1. atel__atel_order_get args={"orderId":"${orderId}"} — read the order description.`,
+    `2. atel__atel_milestone_list args={"orderId":"${orderId}"} — read milestone[0]'s title and any plan notes.`,
+    `3. WRITE substantive deliverable content for M0 (real content matching the title + the order description). Match the language the order asks for. Not placeholder, not "TBD", not the milestone label like "M0".`,
+    `4. atel__atel_milestone_submit args={"orderId":"${orderId}","index":0,"content":"<your deliverable text>"}`,
+    ``,
+    `Do ONLY the above. Do not sweep other orders, do not list other agents, do not query balance. Reply NO_REPLY when done.`,
+  ].join("\n");
+}
+
+export function enqueueMilestonePlanConfirmedHook({ messageBody, identityPath }) {
+  if (!HOOK_MODE_ENABLED) return;
+  try {
+    const ourDid = loadOurDid(identityPath);
+    if (!ourDid) return;
+    const evt = unwrapEvent(messageBody);
+    const eventType = String(evt?.event || evt?.eventType || "").replace(/\./g, "_");
+    if (eventType !== "milestone_plan_confirmed") return;
+    const payload = evt?.payload || evt || {};
+    const orderId = payload.orderId || payload.order_id;
+    if (!orderId) {
+      console.log(`[atel-mcp/listener-hook] milestone_plan_confirmed missing orderId — skip`);
+      return;
+    }
+
+    if (!weAreExecutor(orderId, ourDid)) {
+      // Only the executor needs to submit M0. Requester just observes
+      // the plan_confirmed card via tg-dispatch.
+      console.log(`[atel-mcp/listener-hook] plan_confirmed for ${orderId} — not us executor (or unknown role), skip hook`);
+      return;
+    }
+
+    // Dedupe per order — plan_confirmed should fire exactly once per
+    // order lifetime, but platform may retry the push so guard against
+    // double submits.
+    const dedupeKey = `milestone_plan_confirmed:${orderId}`;
+    pruneHookDedup();
+    if (hookDedup.has(dedupeKey)) {
+      console.log(`[atel-mcp/listener-hook] dedup hit ${dedupeKey} — skip`);
+      return;
+    }
+    hookDedup.set(dedupeKey, Date.now());
+
+    const prompt = buildPromptMilestonePlanConfirmed(orderId);
+    hookQueue.push({ eventType: "milestone_plan_confirmed", orderId, prompt });
+    console.log(`[atel-mcp/listener-hook] enqueued event=milestone_plan_confirmed order=${orderId} → submit M0 (queue depth=${hookQueue.length}, busy=${hookWorkerBusy})`);
+    processHookQueue();
+  } catch (e) {
+    console.warn(`[atel-mcp/listener-hook] enqueue error: ${e && e.message}`);
+  }
+}
+
 // 0.6.39: executor-side hook for milestone_rejected.
 //
 // Product spec is "executor auto-resubmits on reject; after 3 rejects the
@@ -699,6 +775,7 @@ export async function startListener({ host = "0.0.0.0", port = 3101, hmacSecret 
         // events (executor side only). Runs in parallel to the cron-tick
         // path which is still the safety net.
         maybeCacheOrderRole(messageBody, identityPath);
+        enqueueMilestonePlanConfirmedHook({ messageBody, identityPath });
         enqueueMilestoneVerifiedHook({ messageBody, identityPath });
         enqueueMilestoneSubmittedHook({ messageBody, identityPath });
         enqueueMilestoneRejectedHook({ messageBody, identityPath });
