@@ -4,6 +4,7 @@ import type { AuditEvent } from '../contracts/audit.js';
 import type { AtelRuntimeBackend, AtelUserMode, ExecutionRoutePlan } from '../contracts/runtime.js';
 import { PlatformClient } from '../platform/client.js';
 import { createAuthIntrospectionClient, type AuthIntrospectionClient } from '../auth/introspection.js';
+import { CompositeAuthIntrospectionClient, DidSigIntrospectionClient } from '../auth/did-sig.js';
 import { resolveSession } from '../auth/session.js';
 import type { AtelSession } from '../auth/types.js';
 
@@ -70,7 +71,14 @@ export async function buildRequestContext(args: {
     declaredUserMode: args.declaredUserMode,
   };
 
-  const auth = args.deps?.auth ?? createAuthIntrospectionClient(args.config);
+  // Tests inject `args.deps.auth` directly. In production we compose
+  // Bearer (existing /auth/v1/session+/me chain) with DID-Sig (forwards to
+  // /auth/v1/verify) so headless agents have a path that doesn't require
+  // the OAuth browser dance.
+  const auth = args.deps?.auth ?? new CompositeAuthIntrospectionClient(
+    createAuthIntrospectionClient(args.config),
+    new DidSigIntrospectionClient(args.config),
+  );
   const session = await resolveSession(
     { authorization: args.authorization, requestId: meta.requestId, toolName: meta.toolName },
     { auth },
@@ -80,7 +88,12 @@ export async function buildRequestContext(args: {
     meta,
     session,
     config: args.config,
-    platform: new PlatformClient(args.config),
+    // Default idempotency-key falls back to requestId when host doesn't
+    // supply one. Means every MCP→platform POST is idempotent within the
+    // same request scope without burdening the caller.
+    // Rate-limit key is the session DID — MUST be per-identity, not
+    // per-request, or the limit never fires (audit-fix 2026-05-03).
+    platform: new PlatformClient(args.config, meta.idempotencyKey ?? meta.requestId, session.did),
     executionPlan: {
       declaredUserMode: args.declaredUserMode,
       selectedBackend: 'platform-hosted',

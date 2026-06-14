@@ -1,10 +1,15 @@
-import { OrderAcceptInputSchema, OrderCreateInputSchema, OrderIdSchema } from '../contracts/schemas.js';
-import { acceptOrder, createOrder, getOrder, getOrderTimeline, listMilestones, listOrders } from '../platform/adapters.js';
+import { OrderAcceptInputSchema, OrderCompleteInputSchema, OrderConfirmInputSchema, OrderCreateInputSchema, OrderIdSchema } from '../contracts/schemas.js';
+import { z } from 'zod/v4';
+import { acceptOrder, completeOrder, confirmOrder, createOrder, getOrder, getOrderTimeline, listMilestones, listOrders, milestonesFeedback } from '../platform/adapters.js';
+import { getCapabilityRegistry, validateCapability } from '../platform/capability-cache.js';
 import { getRuntimeLinkSecret } from '../runtime-links/store.js';
 import { invokeLinkedRuntimeTool } from '../runtime-links/dispatch.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
+import { assertPrerequisite } from '../auth/guards.js';
+import { executorReady, sufficientBalance, walletReady, orderInStatus, callerIsRole } from '../auth/prerequisites.js';
+import { AtelMcpError } from '../contracts/errors.js';
 
 export async function atelOrderGet(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.read');
@@ -27,6 +32,39 @@ export async function atelOrderTimeline(ctx: ToolExecutionContext, input: unknow
 export async function atelOrderCreate(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.write');
   const parsed = OrderCreateInputSchema.parse(input);
+
+  // Validate capability against the platform's standard registry. Cuts
+  // the "host LLM invents capability string" drift case at the MCP layer
+  // before any platform round-trip. Aliases (e.g. "code" → "coding") are
+  // accepted and normalized so we forward the canonical name to platform.
+  const registry = await getCapabilityRegistry(ctx.config);
+  const capCheck = validateCapability(registry, parsed.capabilityType);
+  if (!capCheck.ok) {
+    throw new AtelMcpError(
+      'INVALID_INPUT',
+      `Unknown capabilityType: ${parsed.capabilityType}`,
+      { suggested: capCheck.suggestion, valid: registry.capabilities },
+      capCheck.hint,
+    );
+  }
+  // Forward the normalized canonical name to platform, not the raw input.
+  parsed.capabilityType = capCheck.normalized;
+
+  // Reject before locking funds: executor exists & online & has the capability,
+  // requester wallet on the settlement chain is deployed + has price + 5%
+  // gas buffer. Without these, order goes onchain → escrow lock → executor
+  // can never accept (offline / wrong skill) → order expires → user frustration.
+  //
+  // chain selection: requester-provided chain wins; otherwise default 'base'
+  // to preserve pre-fast-coop behavior. fast-coop bypasses EVM wallet checks
+  // because the requester's Fast address IS their DID (no separate wallet
+  // deployment, no gas budget needed beyond Fast tx fee).
+  await assertPrerequisite(ctx.session, () => executorReady(ctx, parsed.executorDid, parsed.capabilityType));
+  const settleChain = parsed.chain ?? 'base';
+  if (settleChain === 'base' || settleChain === 'bsc') {
+    await assertPrerequisite(ctx.session, () => walletReady(ctx, settleChain));
+    await assertPrerequisite(ctx.session, () => sufficientBalance(ctx, settleChain, parsed.priceUsdc));
+  }
 
   let result: unknown;
   let backend = 'platform-hosted';
@@ -70,9 +108,47 @@ export async function atelOrderCreate(ctx: ToolExecutionContext, input: unknown)
   return result;
 }
 
+/**
+ * Confirm or reject the auto-generated milestone plan after both
+ * parties have engaged. After atel_order_accept locks escrow the order
+ * sits in milestone_review and BOTH requester + executor must call
+ * this with approved=true before M0 begins. Either side can also pass
+ * approved=false + feedback to request a revision of the plan.
+ */
+export const MilestonePlanFeedbackInputSchema = z.object({
+  orderId: z.string().min(1).startsWith('ord-'),
+  approved: z.boolean(),
+  feedback: z.string().max(2000).optional(),
+});
+
+export async function atelMilestonePlanFeedback(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'milestones.write');
+  const parsed = MilestonePlanFeedbackInputSchema.parse(input);
+  await assertPrerequisite(ctx.session, () => orderInStatus(ctx, parsed.orderId, ['milestone_review']));
+  const result = await milestonesFeedback(ctx, parsed);
+  await ctx.emitAudit({
+    ...childAuditBase(ctx),
+    type: 'tool.succeeded',
+    status: 'ok',
+    entityType: 'order',
+    entityId: parsed.orderId,
+    metadata: { action: 'milestone_plan_feedback', approved: parsed.approved },
+  });
+  return result;
+}
+
 export async function atelOrderAccept(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'orders.write');
   const orderId = OrderAcceptInputSchema.parse(input).orderId;
+
+  // Server-side state-machine enforcement: order must be in a pre-acceptance
+  // state + caller must be the assigned executor. Stops host LLM from
+  // "accepting" an order that's already executing or that someone else owns.
+  // Platform sets status='created' at INSERT (see internal/trade/handler.go
+  // INSERT INTO orders ... 'created' ...); we accept the equivalent older
+  // names 'pending' / 'pending_acceptance' too for forward-compat.
+  await assertPrerequisite(ctx.session, () => orderInStatus(ctx, orderId, ['created', 'pending', 'pending_acceptance']));
+  await assertPrerequisite(ctx.session, () => callerIsRole(ctx, orderId, 'executor'));
 
   let result: unknown;
   let backend = 'platform-hosted';
@@ -107,6 +183,45 @@ export async function atelOrderAccept(ctx: ToolExecutionContext, input: unknown)
     metadata: {
       backend,
       routeTarget,
+    },
+  });
+  return result;
+}
+
+export async function atelOrderComplete(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'orders.write');
+  const parsed = OrderCompleteInputSchema.parse(input);
+  const result = await completeOrder(ctx, parsed);
+
+  await ctx.emitAudit({
+    ...childAuditBase(ctx),
+    type: 'order.completed',
+    status: 'ok',
+    entityType: 'order',
+    entityId: parsed.orderId,
+    orderId: parsed.orderId,
+    metadata: {
+      backend: 'platform-hosted',
+      chain: parsed.chain,
+    },
+  });
+  return result;
+}
+
+export async function atelOrderConfirm(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'orders.write');
+  const orderId = OrderConfirmInputSchema.parse(input).orderId;
+  const result = await confirmOrder(ctx, orderId);
+
+  await ctx.emitAudit({
+    ...childAuditBase(ctx),
+    type: 'order.confirmed',
+    status: 'ok',
+    entityType: 'order',
+    entityId: orderId,
+    orderId,
+    metadata: {
+      backend: 'platform-hosted',
     },
   });
   return result;

@@ -17,7 +17,7 @@ export function createRuntimeFromEnv(identityPathEnv) {
             "atel-mcp": {
               config: {
                 serverBaseUrl: process.env.ATEL_PLUGIN_REMOTE_BASE_URL ?? "https://43-160-230-129.sslip.io",
-                platformBaseUrl: process.env.ATEL_PLUGIN_PLATFORM_BASE_URL ?? "https://api.atelai.org",
+                platformBaseUrl: process.env.ATEL_PLUGIN_PLATFORM_BASE_URL ?? "https://api.atelai.xyz",
                 identityPath: required(identityPathEnv),
                 sdkDistPath: required("ATEL_PLUGIN_SDK_DIST_PATH"),
                 naclPath: required("ATEL_PLUGIN_NACL_PATH"),

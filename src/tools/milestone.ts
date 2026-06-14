@@ -5,10 +5,19 @@ import { invokeLinkedRuntimeTool } from '../runtime-links/dispatch.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { childAuditBase } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
+import { assertPrerequisite } from '../auth/guards.js';
+import { orderInStatus, callerIsRole, previousMilestoneVerified, milestoneIsSubmitted } from '../auth/prerequisites.js';
 
 export async function atelMilestoneSubmit(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'milestones.write');
   const parsed = MilestoneSubmitInputSchema.parse(input);
+
+  // Server-side state-machine: order executing + caller is executor +
+  // previous milestone verified + content reasonable length. Eliminates
+  // out-of-order submissions and "test 1234" placeholder content.
+  await assertPrerequisite(ctx.session, () => orderInStatus(ctx, parsed.orderId, ['executing']));
+  await assertPrerequisite(ctx.session, () => callerIsRole(ctx, parsed.orderId, 'executor'));
+  await assertPrerequisite(ctx.session, () => previousMilestoneVerified(ctx, parsed.orderId, parsed.index));
 
   let result: unknown;
   let backend = 'platform-hosted';
@@ -49,6 +58,12 @@ export async function atelMilestoneSubmit(ctx: ToolExecutionContext, input: unkn
 export async function atelMilestoneVerify(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'milestones.write');
   const parsed = MilestoneActionInputSchema.parse(input);
+
+  // Only requester can verify; only milestones in 'submitted' status can be
+  // verified. Eliminates host LLM "verifying" milestones the executor never
+  // submitted (silent state-machine corruption).
+  await assertPrerequisite(ctx.session, () => callerIsRole(ctx, parsed.orderId, 'requester'));
+  await assertPrerequisite(ctx.session, () => milestoneIsSubmitted(ctx, parsed.orderId, parsed.index));
 
   let result: unknown;
   let backend = 'platform-hosted';
@@ -95,6 +110,11 @@ export function milestoneRejectAuditTypeFromOutcome(outcome: string) {
 export async function atelMilestoneReject(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'milestones.write');
   const parsed = MilestoneSubmitInputSchema.pick({ orderId: true, index: true, content: true }).parse(input);
+
+  // Same prerequisites as verify (requester + milestone submitted). The
+  // 3-rejects-trigger-arbitration flow is enforced platform-side after this.
+  await assertPrerequisite(ctx.session, () => callerIsRole(ctx, parsed.orderId, 'requester'));
+  await assertPrerequisite(ctx.session, () => milestoneIsSubmitted(ctx, parsed.orderId, parsed.index));
 
   let result: unknown;
   let backend = 'platform-hosted';

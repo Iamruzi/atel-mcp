@@ -1,15 +1,37 @@
 import {
   AgentRegisterInputSchema,
   AgentSearchInputSchema,
+  DashboardAuthInputSchema,
+  RecoverInputSchema,
+  RegisterEndpointInputSchema,
+  RegisterUserInputSchema,
   RuntimeLinkBindInputSchema,
   RuntimeLinkMutationOutputSchema,
   RuntimeLinkStatusOutputSchema,
   WhoamiOutputSchema,
 } from '../contracts/schemas.js';
-import { registryRegister, registrySearch } from '../platform/adapters.js';
+import { getAgent, recoverIdentity, recoverSecretKey, registerUser, registryRegister, registrySearch, registryUpdateEndpoint } from '../platform/adapters.js';
 import { getRuntimeLink, removeRuntimeLink, upsertRuntimeLink } from '../runtime-links/store.js';
 import type { ToolExecutionContext } from '../server/context.js';
 import { requireScope } from '../server/guards.js';
+import { AtelMcpError } from '../contracts/errors.js';
+
+/**
+ * Throw NOT_IMPLEMENTED if runtime-links subsystem is turned off in config.
+ * The 3 runtime-link tools share this guard so deployments that opt out
+ * (e.g. an MCP host that does not serve OpenClaw / 龙虾 users) give a
+ * single, explainable error to every caller.
+ */
+function assertRuntimeLinksEnabled(ctx: ToolExecutionContext): void {
+  if (!ctx.config.runtimeLinksEnabled) {
+    throw new AtelMcpError(
+      'NOT_IMPLEMENTED',
+      'Runtime-links subsystem is disabled on this MCP server',
+      { configFlag: 'ATEL_MCP_RUNTIME_LINKS_ENABLED' },
+      'This MCP host is not configured to serve OpenClaw / 龙虾 runtime bindings. Contact ops if your DID needs runtime forwarding here, or use a host that has runtime-links enabled (the default).',
+    );
+  }
+}
 
 function runtimeArchitecture(ctx: ToolExecutionContext) {
   return {
@@ -31,6 +53,60 @@ export async function atelWhoami(ctx: ToolExecutionContext) {
   return WhoamiOutputSchema.parse(output);
 }
 
+/**
+ * Pre-auth onboarding tool. Mints a fresh ATEL identity end-to-end so
+ * external hosts (Claude Desktop / Cursor / Codex / OpenClaw etc.) can
+ * give brand-new users access without a separate dashboard signup step.
+ *
+ * Returns:
+ *   - did: the new identity (did:atel:ed25519:<base58>)
+ *   - secretKey: ed25519 64-byte key (base64) — caller MUST persist
+ *     this securely (e.g. ~/.atel/identity.json). Server does not keep
+ *     a copy in this version (no KEK custody yet).
+ *   - publicKey: base58-encoded 32-byte public key
+ *   - token: 7-day JWT bearer for immediate use
+ *   - walletStatus: "pending" — caller polls atel_balance later until
+ *     wallet addresses appear (T3.1.2 will surface a dedicated tool)
+ *
+ * Bypass for the usual scope check happens in dispatch (PRE_AUTH_TOOLS).
+ */
+export async function atelRegisterUser(ctx: ToolExecutionContext, input: unknown) {
+  // No scope/auth check — dispatch already routed via the pre-auth path.
+  const parsed = RegisterUserInputSchema.parse(input ?? {});
+  const result = await registerUser(ctx.config, {
+    name: parsed.name,
+    sourceLabel: parsed.sourceLabel ?? ctx.meta.hostName ?? 'mcp-host',
+  });
+  return result;
+}
+
+/**
+ * Pre-auth recovery tool. User submits the recovery code returned by
+ * atel_register_user; gets back the DID. Pairs with their stored
+ * secretKey (which they MUST have) to resume operation via DID-Sig.
+ *
+ * This is a DID lookup, not a secretKey recovery. Lost secretKey is
+ * still lost — by design, until KEK custody arrives.
+ */
+export async function atelRecover(ctx: ToolExecutionContext, input: unknown) {
+  const parsed = RecoverInputSchema.parse(input);
+  return recoverIdentity(ctx.config, parsed);
+}
+
+/**
+ * Recover the full secretKey for a DID using its recoveryCode. Different
+ * from atelRecover above: that one only returns the DID; this one returns
+ * the actual secretKey, which the caller can use to rebuild
+ * .atel/identity.json on a fresh machine after losing the local copy.
+ *
+ * Requires server-side KEK backup (mcp_secret_key_backups row); identities
+ * registered before that feature shipped get 410 Gone with a hint.
+ */
+export async function atelSecretKeyRecover(ctx: ToolExecutionContext, input: unknown) {
+  const parsed = RecoverInputSchema.parse(input);
+  return recoverSecretKey(ctx.config, parsed);
+}
+
 export async function atelAgentRegister(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'identity.read');
   return registryRegister(ctx, AgentRegisterInputSchema.parse(input));
@@ -41,8 +117,97 @@ export async function atelAgentSearch(ctx: ToolExecutionContext, input: unknown)
   return registrySearch(ctx, AgentSearchInputSchema.parse(input));
 }
 
+/**
+ * Register a callback URL the platform can use to push async events
+ * (order_accepted / milestone callbacks / settlement notifications).
+ *
+ * Server-side guarantees (see atel-platform/internal/registry/endpoint_handler.go):
+ *   - HTTPS required (http:// rejected with hint)
+ *   - Reachability verified via HEAD request before persisting
+ *   - URL de-duped so re-registering the same URL doesn't bloat candidates
+ *
+ * Use case: SDK / OpenClaw / self-hosted agents need this. Pure MCP-only
+ * users (no local runtime) can skip it — they get events via polling
+ * (atel_inbox_list) instead.
+ */
+export async function atelRegisterEndpoint(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'identity.read');
+  const parsed = RegisterEndpointInputSchema.parse(input);
+  return registryUpdateEndpoint(ctx, parsed);
+}
+
+/**
+ * Dashboard /login authorization (server-side proxy).
+ *
+ * Plugin's original `atel_mcp action=dashboard_auth` was an OpenClaw-plugin-
+ * registered tool that the loader silently dropped after 2026-05-07. To keep
+ * dashboard login working over the mcp.servers transport, we expose
+ * `atel_dashboard_auth` server-side. Because the signing step needs the
+ * user's local identity.json private key (the server has none), we look up
+ * the agent's registered listener endpoint and POST the code to its
+ * `/dashboard-auth` route. The listener signs locally, calls
+ * /auth/v1/verify, and returns the verdict.
+ *
+ * Auth chain: caller's DID-Sig JWT → server lookup of their own agent row
+ * → call agent's listener endpoint. We never trust a different DID's
+ * endpoint here — the listener call always targets ctx.session.did.
+ *
+ * Tester report 2026-05-11 §4.2 surfaced this gap.
+ */
+export async function atelDashboardAuth(ctx: ToolExecutionContext, input: unknown) {
+  requireScope(ctx, 'identity.read');
+  const parsed = DashboardAuthInputSchema.parse(input);
+
+  const agent = (await getAgent(ctx, ctx.session.did)) as { endpoint?: string } | null;
+  if (!agent || typeof agent.endpoint !== 'string' || agent.endpoint.length === 0) {
+    throw new AtelMcpError(
+      'PREREQUISITE_NOT_MET',
+      'Your agent has no registered listener endpoint. Run the plugin install / register_endpoint first.',
+      { did: ctx.session.did, missing: 'endpoint' },
+      'Re-run `npx -y atel-mcp-openclaw` so the plugin can register its listener endpoint with platform.',
+    );
+  }
+
+  const target = agent.endpoint.replace(/\/$/, '') + '/dashboard-auth';
+  let response: Response;
+  try {
+    response = await fetch(target, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-atel-timestamp': new Date().toISOString(),
+      },
+      body: JSON.stringify({ code: parsed.code }),
+    });
+  } catch (e) {
+    throw new AtelMcpError(
+      'UPSTREAM_ERROR',
+      `Could not reach plugin listener at ${target}: ${(e as Error).message}`,
+      { endpoint: target, kind: 'listener_unreachable' },
+      'Make sure the lobster runtime is online and the listener (port 3101 by default) is reachable from this MCP server.',
+    );
+  }
+
+  const raw = await response.text();
+  let payload: unknown;
+  try { payload = raw ? JSON.parse(raw) : null; } catch { payload = { raw }; }
+
+  if (!response.ok) {
+    throw new AtelMcpError(
+      'UPSTREAM_ERROR',
+      `Listener returned ${response.status}`,
+      { status: response.status, body: payload, kind: 'listener_error' },
+      'Plugin listener rejected the dashboard auth request. Check the lobster runtime logs.',
+    );
+  }
+
+  return payload;
+}
+
+/** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */
 export async function atelRuntimeLinkStatus(ctx: ToolExecutionContext) {
   requireScope(ctx, 'identity.read');
+  assertRuntimeLinksEnabled(ctx);
   const runtimeLink = await getRuntimeLink(ctx.config, ctx.session.did);
   return RuntimeLinkStatusOutputSchema.parse({
     did: ctx.session.did,
@@ -53,8 +218,10 @@ export async function atelRuntimeLinkStatus(ctx: ToolExecutionContext) {
   });
 }
 
+/** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */
 export async function atelRuntimeLinkBind(ctx: ToolExecutionContext, input: unknown) {
   requireScope(ctx, 'identity.read');
+  assertRuntimeLinksEnabled(ctx);
   const payload = RuntimeLinkBindInputSchema.parse(input);
   const runtimeLink = await upsertRuntimeLink(ctx.config, {
     hostedDid: ctx.session.did,
@@ -75,8 +242,10 @@ export async function atelRuntimeLinkBind(ctx: ToolExecutionContext, input: unkn
   });
 }
 
+/** Runtime-link surface for OpenClaw / 龙虾 binding. Gated by config.runtimeLinksEnabled (default on). */
 export async function atelRuntimeLinkUnbind(ctx: ToolExecutionContext) {
   requireScope(ctx, 'identity.read');
+  assertRuntimeLinksEnabled(ctx);
   const removed = await removeRuntimeLink(ctx.config, ctx.session.did);
   return RuntimeLinkMutationOutputSchema.parse({
     did: ctx.session.did,

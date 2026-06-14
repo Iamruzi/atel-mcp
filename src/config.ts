@@ -21,6 +21,40 @@ export interface AtelMcpConfig {
   allowCustomRemoteMcp: boolean;
   disableRegisterRateLimit?: boolean;
   auditLogPath?: string;
+  /**
+   * Whether to also POST each audit event to the platform's mcp_audit_log
+   * ingest endpoint. JSONL stays as the on-host primary regardless. Off by
+   * default until the platform endpoint is ready and field-aligned.
+   */
+  auditPlatformIngestEnabled: boolean;
+  /** Bearer token for the platform audit ingest endpoint (separate from user sessions). */
+  auditPlatformIngestToken?: string;
+  /**
+   * Whether atel_audit_* read tools should call platform first (with the
+   * same shared-secret token), falling back to JSONL only on error.
+   * Default false — preserves the current local-JSONL behavior until
+   * platform write side is reliably populated. Independent toggle from
+   * ingest because read paths can be enabled before write side is fully
+   * backfilled.
+   */
+  auditPlatformReadEnabled: boolean;
+  /** Identifier for this MCP instance — used by platform de-dup if MCP runs HA. */
+  mcpInstance: string;
+  /**
+   * Whether the runtime-links subsystem is wired into dispatch.
+   *
+   * Default true because most ATEL users come in through OpenClaw / 龙虾,
+   * which relies on this subsystem to forward tool calls to a registered
+   * agent runtime (see src/runtime-links/dispatch.ts).
+   *
+   * Set to false ONLY for MCP hosts that do not serve 龙虾 users (e.g.
+   * an internal-tooling MCP). When false:
+   *   - the 3 atel_runtime_link_* tools return NOT_IMPLEMENTED
+   *   - dispatch skips getRuntimeLink (one fewer file read per call)
+   *   - linked-runtime never wins backend selection (always platform-hosted)
+   *   - invokeLinkedRuntimeTool is never reached
+   */
+  runtimeLinksEnabled: boolean;
   userEntryMode: AtelUserEntryMode;
   runtimeRole: AtelRuntimeRole;
   runtimeBackends: string[];
@@ -57,7 +91,7 @@ function parseCsvList(raw: string | undefined, fallback: string[]): string[] {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig {
-  const platformBaseUrl = env.ATEL_PLATFORM_BASE_URL ?? 'https://api.atelai.org';
+  const platformBaseUrl = env.ATEL_PLATFORM_BASE_URL ?? 'https://api.atelai.xyz';
   const registryBaseUrl = env.ATEL_REGISTRY_BASE_URL ?? platformBaseUrl;
   const relayBaseUrl = env.ATEL_RELAY_BASE_URL ?? platformBaseUrl;
   const port = Number(env.PORT ?? '8787');
@@ -76,7 +110,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
   const routeBasePath = publicPath || issuerPath;
 
   let environment: AtelEnvironmentProfile = 'custom';
-  if (platformBaseUrl === 'https://api.atelai.org') environment = 'production';
+  if (platformBaseUrl === 'https://api.atelai.xyz') environment = 'production';
   if (platformBaseUrl.includes('127.0.0.1') || platformBaseUrl.includes('localhost')) environment = 'local-test';
 
   return {
@@ -96,6 +130,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AtelMcpConfig 
     allowCustomRemoteMcp: env.ALLOW_CUSTOM_REMOTE_MCP === 'true',
     disableRegisterRateLimit: env.ATEL_MCP_DISABLE_REGISTER_RATE_LIMIT === 'true',
     auditLogPath: env.ATEL_MCP_AUDIT_LOG_PATH?.trim() || undefined,
+    auditPlatformIngestEnabled: env.ATEL_MCP_AUDIT_PLATFORM_INGEST?.trim().toLowerCase() === 'true',
+    auditPlatformIngestToken: env.ATEL_MCP_AUDIT_PLATFORM_INGEST_TOKEN?.trim() || undefined,
+    auditPlatformReadEnabled: env.ATEL_MCP_AUDIT_PLATFORM_READ?.trim().toLowerCase() === 'true',
+    mcpInstance: env.ATEL_MCP_INSTANCE_ID?.trim() || env.HOSTNAME?.trim() || `${host}:${port}`,
+    // Default true. ATEL_MCP_RUNTIME_LINKS_ENABLED=false only on MCP hosts
+    // that don't serve OpenClaw / 龙虾 users (a small minority).
+    runtimeLinksEnabled: env.ATEL_MCP_RUNTIME_LINKS_ENABLED?.trim().toLowerCase() !== 'false',
     userEntryMode: 'mcp-primary',
     runtimeRole: 'sdk-runtime',
     runtimeBackends: parseCsvList(env.ATEL_MCP_RUNTIME_BACKENDS, ['platform-hosted', 'sdk-runtime', 'linked-runtime']),

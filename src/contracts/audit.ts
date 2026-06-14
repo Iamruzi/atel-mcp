@@ -13,6 +13,8 @@ export type AuditEventType =
   | 'message.acked'
   | 'order.created'
   | 'order.accepted'
+  | 'order.completed'
+  | 'order.confirmed'
   | 'milestone.submitted'
   | 'milestone.verified'
   | 'milestone.rejected'

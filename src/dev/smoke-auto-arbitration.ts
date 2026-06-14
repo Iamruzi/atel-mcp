@@ -36,6 +36,26 @@ async function main() {
   const requester = await createClient(requesterToken, serverUrl);
   const executor = await createClient(executorToken, serverUrl);
   try {
+    await requester.callTool({
+      name: 'atel_agent_register',
+      arguments: {
+        name: process.env.ATEL_MCP_REQUESTER_NAME ?? 'MCP Arbitration Smoke Requester',
+        description: 'Remote MCP arbitration smoke requester identity',
+        capabilities: ['research', 'analysis'],
+        discoverable: true,
+      },
+    });
+
+    await executor.callTool({
+      name: 'atel_agent_register',
+      arguments: {
+        name: process.env.ATEL_MCP_EXECUTOR_NAME ?? 'MCP Arbitration Smoke Executor',
+        description: 'Remote MCP arbitration smoke executor identity',
+        capabilities: [capabilityType, 'analysis'],
+        discoverable: true,
+      },
+    });
+
     const createResult = parseTextPayload(await requester.callTool({
       name: 'atel_order_create',
       arguments: {

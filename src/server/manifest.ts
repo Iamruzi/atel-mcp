@@ -9,6 +9,8 @@ import {
   MilestoneActionInputSchema,
   MilestoneSubmitInputSchema,
   OrderAcceptInputSchema,
+  OrderCompleteInputSchema,
+  OrderConfirmInputSchema,
   OrderCreateInputSchema,
   RuntimeLinkBindInputSchema,
   SendMessageInputSchema,
@@ -40,6 +42,8 @@ export const MVP_MANIFEST = {
     { name: 'atel_order_timeline' },
     { name: 'atel_order_create', input: OrderCreateInputSchema },
     { name: 'atel_order_accept', input: OrderAcceptInputSchema },
+    { name: 'atel_order_complete', input: OrderCompleteInputSchema },
+    { name: 'atel_order_confirm', input: OrderConfirmInputSchema },
   ],
   milestone: [
     { name: 'atel_milestone_list' },

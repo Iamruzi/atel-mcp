@@ -17,4 +17,6 @@ test('buildServiceMetadata exposes MCP-primary and runtime compatibility framing
   assert.deepEqual(metadata.architecture.runtimeBackends, ['platform-hosted', 'sdk-runtime']);
   assert.deepEqual(metadata.architecture.supportedUserModes, ['mcp-only', 'runtime-only', 'mcp-plus-runtime']);
   assert.equal(metadata.architecture.sourceOfTruth, 'platform');
+  assert.ok(metadata.toolGroups.order.includes('atel_order_complete'));
+  assert.ok(metadata.toolGroups.order.includes('atel_order_confirm'));
 });

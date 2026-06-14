@@ -23,7 +23,7 @@ async function main() {
     await dispatchTool({
       toolName: 'atel_whoami',
       authorization: 'Bearer env-mismatch-token',
-      config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.org' } as never),
+      config: loadConfig({ ATEL_PLATFORM_BASE_URL: 'https://api.atelai.xyz' } as never),
       auth,
     });
     throw new Error('Expected ENVIRONMENT_MISMATCH but tool invocation succeeded.');

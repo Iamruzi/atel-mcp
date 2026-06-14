@@ -1,3 +1,15 @@
+/**
+ * Linked-runtime forwarding for OpenClaw / 龙虾 users.
+ *
+ * When a hosted DID has a runtime-link bound (see store.ts), tool calls
+ * for that DID are forwarded to the agent runtime registered by 龙虾
+ * instead of being executed locally. This is the production path for the
+ * majority of ATEL users.
+ *
+ * Lives behind config.runtimeLinksEnabled (default on) +
+ * executionPlan.selectedBackend === 'linked-runtime' (only when the DID
+ * actually has a link bound to a linked-runtime backend).
+ */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AtelMcpError } from '../contracts/errors.js';

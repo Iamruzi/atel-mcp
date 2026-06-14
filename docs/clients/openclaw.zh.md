@@ -1,99 +1,87 @@
-# OpenClaw 用户怎么理解 ATEL MCP
+# OpenClaw TG Bot 如何接入 ATEL MCP
 
-这份文档和前两份不一样。
+OpenClaw 原生 ATEL 流程和 ATEL MCP 是两条入口。
+如果要求“TG Bot 里明确调用 MCP 工具”，OpenClaw 必须先安装并配置
+`atel-mcp` 插件，否则只能走原生 OpenClaw / raw ATEL CLI，不能算 MCP 测试。
 
-如果你本来就是 OpenClaw 用户，`atel-mcp` 通常不是你的主入口。
+## 必须具备的三件事
 
-## 先说结论
+1. `atel-mcp` OpenClaw 插件已安装，并且 `openclaw plugins inspect atel-mcp --json` 显示 `status=loaded`。
+2. `~/.openclaw/openclaw.json` 里有 `plugins.entries.atel-mcp.config`。
+3. `identityPath` 指向本次测试要使用的 ATEL DID 身份，Requester/Executor 不能混用。
 
-对 OpenClaw 用户来说：
+## 一键安装
 
-- 优先走原生的 ATEL / OpenClaw 流程
-- MCP 主要用于把 ATEL 暴露给外部通用 AI 宿主
+发布到 npm 后，用户可以直接执行：
 
-也就是说：
-
-- OpenClaw 是你的原生运行时
-- `atel-mcp` 是给外部宿主接入用的桥
-
-## 什么情况下该走原生流程
-
-如果你想做的是：
-
-- 正常 P2P 聊天
-- 正常订单流
-- 正常通知回调
-- 直接平台集成
-- 更少中间层
-
-那就优先用原生 OpenClaw / ATEL 方式。
-
-这也是生产上更自然、更稳的路径。
-
-## 什么情况下才需要走 MCP
-
-只有在这些场景下，OpenClaw 用户才需要关心 `atel-mcp`：
-
-- 你想让 Claude Code、Codex 这类外部宿主操作 ATEL
-- 你需要一个标准化 MCP 工具接口
-- 你在对接一个本来就基于 MCP 的第三方客户端
-
-## 为什么不建议 OpenClaw 用户默认绕一层 MCP
-
-因为 OpenClaw 本身就比通用 MCP 宿主更懂你的 ATEL 业务。
-
-如果 OpenClaw 用户默认走 MCP，反而会多出：
-
-- 一层 OAuth
-- 一层宿主侧工具规划
-- 一层从模型意图到业务动作的映射
-
-这在“外部互操作”场景下有价值，但不是最简单的生产使用方式。
-
-## 如果你还是要在 OpenClaw 场景里用 MCP
-
-Remote MCP 地址按这个格式理解：
-
-```text
-${ATEL_MCP_BASE_URL}/mcp
+```bash
+npx -y atel-mcp-openclaw --identity /path/to/.atel/identity.json
 ```
 
-当前示例地址：
+在 `atel-mcp` 仓库内测试或开发时执行：
 
-```text
-https://43-160-230-129.sslip.io/mcp
+```bash
+ATEL_IDENTITY_PATH=/path/to/.atel/identity.json ./scripts/install-openclaw-plugin.sh
 ```
 
-接进去后，能拿到的还是同一套 ATEL 工具能力：
+默认生产入口：
 
-- 身份
-- 钱包
-- 联系人
-- 收件箱
-- 消息
-- 订单
-- 里程碑
-- dispute
-- 审计
+```text
+serverBaseUrl=https://atelai.xyz
+platformBaseUrl=https://api.atelai.xyz
+```
 
-## 产品定位上应该怎么讲
+## 配置样例
 
-最清楚的说法是：
+```json
+{
+  "plugins": {
+    "entries": {
+      "atel-mcp": {
+        "enabled": true,
+        "config": {
+          "serverBaseUrl": "https://atelai.xyz",
+          "platformBaseUrl": "https://api.atelai.xyz",
+          "identityPath": "/path/to/.atel/identity.json"
+        }
+      }
+    }
+  }
+}
+```
 
-- `ATEL Runtime / OpenClaw native`：原生和自托管执行路径
-- `ATEL MCP`：普通 Hosted 用户主入口，同时也是外部 AI 宿主互操作层
+`sdkDistPath` / `naclPath` 只保留为内部兼容开关。普通用户通过 `npx -y atel-mcp-openclaw --identity ...` 安装时不需要配置这些路径。
 
-当前很多 OpenClaw 用户仍然直接走原生 runtime 路径。
-长期方向是：
+## 自检
 
-- 普通用户优先从 MCP 进入
-- Runtime 继续服务 OpenClaw 原生和自托管执行
-- 两条路径共享同一个平台状态机
+```bash
+openclaw config validate
+openclaw plugins inspect atel-mcp --json
+```
 
-这个边界一定要讲清楚，不然用户很容易搞混到底哪层才是主路径。
+合格结果：
 
-## 如果你要对外解释，最简单的话术
+```text
+status=loaded
+toolNames=["atel_mcp"]
+```
 
-可以直接说：
+然后在 TG Bot 里发：
 
-“如果你本来就在用 OpenClaw，就继续走原生 ATEL 流程。MCP 主要是给 Claude Code、Codex 这类通用 AI 宿主接入用的。”
+```text
+使用 ATEL MCP 调用 atel_whoami，告诉我当前 DID、环境和可用权限。
+```
+
+预期返回：
+
+```text
+environment=production
+DID 等于 identityPath 对应的 DID
+```
+
+## 重要边界
+
+- 没装插件时，OpenClaw TG Bot 不能调用 ATEL MCP。
+- 只有 raw `atel` CLI 不算 MCP 集成。
+- `identityPath` 必须和订单 requester/executor runtime 身份一致，否则订单能创建但自动审核/自动接单会断。
+- MCP 触发的订单和通知必须带 `ATEL MCP` 标签；非 MCP 流程不应该带。

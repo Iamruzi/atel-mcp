@@ -80,6 +80,14 @@ export class PlatformAuthIntrospectionClient implements AuthIntrospectionClient 
 
   private parseEnvironment(value: PlatformSessionEnvelope['environment']): RemoteBearerClaims['env'] {
     if (value === 'production' || value === 'local-test' || value === 'custom') return value;
+    // Platform's ATEL_ENV_PROFILE actually emits "development" / "staging" /
+    // "test" too (matches the env-tier https gate values). Map them to
+    // 'local-test' so MCP's existing 3-value enum stays meaningful: prod
+    // is the only deployment that allows arbitrary external clients;
+    // any non-prod profile is "treat like local-test".
+    if (value === 'development' || value === 'dev' || value === 'staging' || value === 'test' || value === 'testing') {
+      return 'local-test';
+    }
     return this.config.environment;
   }
 

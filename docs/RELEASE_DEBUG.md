@@ -30,7 +30,7 @@ Verified coverage:
 - OAuth protected-resource metadata
 - client registration
 - interactive authorization challenge
-- platform verify through `https://api.atelai.org/auth/v1/verify`
+- platform verify through `https://api.atelai.xyz/auth/v1/verify`
 - token exchange
 - `initialize`
 - `tools/list`
